@@ -1,0 +1,32 @@
+{
+  "infinity": {
+    "ckpt": "",
+    "num_frames": 49,
+    "step": 16,
+    "fps": 16,
+    "pn": "0.40M",
+    "h_div_w_template": 1.0,
+    "dynamic_scale_schedule": "infinity_elegant_clip4frames_v2_allpt",
+    "mask_type": "infinity_elegant_clip4frames_v2_allpt",
+    "cfg": 34.0,
+    "tau_image": 1.0,
+    "tau_video": 0.4,
+    "top_k": 900,
+    "top_p": 0.97,
+    "gt_leak_first": 14,
+    "rolling_tail_infer": true,
+    "rolling_infer_mode": "tail_window",
+    "tail_window_frames": 33,
+    "tail_window_start_step": 1,
+    "v2v_history_injection": "official_leak",
+    "late_step_start": 999,
+    "late_top_k": 900,
+    "late_top_p": 0.97,
+    "lock_seed_across_steps": true
+  },
+  "tsformer": {
+    "ckpt": "",
+    "stats": "TSformer-VO-main/adapter_p2p/uav-flow_p2p/p2p_target_stats.json"
+  }
+}
+

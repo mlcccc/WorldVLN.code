@@ -1,0 +1,18 @@
+# 忽略 Python 缓存
+__pycache__/
+*.py[cod]
+
+# 忽略虚拟环境
+venv/
+env/
+
+# 忽略数据集和日志文件 (请根据你的实际情况修改名字)
+dataset/
+logs/
+checkpoints/
+*.pth
+*.pt
+
+# 忽略 IDE 配置文件
+.vscode/
+.idea/

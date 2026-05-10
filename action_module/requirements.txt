@@ -1,0 +1,26 @@
+# Install a matching PyTorch build for your CUDA / CPU environment first:
+# https://pytorch.org/get-started/locally/
+torch
+torchvision
+numpy
+Pillow
+tqdm
+matplotlib
+einops
+fvcore
+iopath
+yacs
+opencv-python
+psutil
+scikit-learn
+tensorboard
+pandas
+timm==0.9.6
+fairscale
+beartype
+requests
+fsspec
+imageio
+imageio-ffmpeg
+easydict
+omegaconf
