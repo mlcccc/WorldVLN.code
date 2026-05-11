@@ -23,7 +23,7 @@ The script still converts the repository root into an absolute runtime path for 
 Expected repository layout:
 
 ```text
-backbone/
+Train_WAM/
 |-- train.py
 |-- scripts/
 |   `-- train_from_base.sh
@@ -216,6 +216,6 @@ Before training, verify:
 4. `checkpoints/infinitystar_8b_480p_weights` exists.
 5. `VIDEO_DATA_PATH` points to a directory containing JSONL files.
 6. Every JSONL entry points to a readable local video file.
-7. Required Python dependencies from `requirements.txt` are installed.
+7. Required Python dependencies from `../requirements.txt` (repository root) are installed.
 
 If any required path is missing, the script exits immediately with an error.

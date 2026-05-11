@@ -1,0 +1,16 @@
+# Shared dependencies for the released open-source workflows.
+#
+# We recommend installing a matching PyTorch build (CUDA/CPU) first, then run:
+#   pip install -r requirements.txt
+#
+# This file consolidates dependencies across:
+# - Train_WAM/action_decoder (latent-to-action training & batch inference)
+# - posttrain/InfinityStar-main (post-training and shared model deps)
+# - infer (online API service)
+
+-r Train_WAM/action_decoder/requirements.txt
+-r posttrain/InfinityStar-main/requirements.txt
+
+fastapi
+uvicorn
+pydantic

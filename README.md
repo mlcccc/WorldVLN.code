@@ -2,7 +2,6 @@
 
 
 This is the official code repository for WorldVLN. The repository includes the main code paths used for backbone training, action decoding, inference serving, and post-training workflows.
-![WorldVLN framework](./assets/framework.png)
 
 ## Demo
 
@@ -18,16 +17,15 @@ The following examples illustrate representative WorldVLN behaviors in both gene
 
 ## Overview
 
-The current codebase is organized into four major components:
+The current codebase is organized into three major components:
 
 | Directory | Description |
 | --- | --- |
-| [backbone/](./backbone) | Backbone training code for WorldVLN. |
-| [action_module/](./action_module) | Adapter distillation, latent-to-action training, batch inference, and evaluation utilities. |
+| [Train_WAM/](./Train_WAM) | Training package for backbone finetuning and the latent-to-action **action decoder** (training, batch inference, evaluation). |
 | [infer/](./infer) | Online inference service for serving the model as an API. |
 | [posttrain/](./posttrain) | StageA rollout collection and StageB post-training workflows, including simulator-backed rollout support. |
 
-At a high level, `backbone/` and `action_module/` cover model training and prediction, `infer/` covers deployment-oriented inference, and `posttrain/` covers the later-stage optimization pipeline.
+At a high level, `Train_WAM/` covers model training and offline prediction utilities, `infer/` covers deployment-oriented inference, and `posttrain/` covers the later-stage optimization pipeline.
 
 ## Installation
 
@@ -51,17 +49,8 @@ conda activate worldvln
 3. Install the shared dependencies used by the released workflows.
 
 ```bash
-pip install -r action_module/requirements.txt
-pip install -r posttrain/InfinityStar-main/requirements.txt
-pip install fastapi uvicorn pydantic
+pip install -r requirements.txt
 ```
-
-### Notes on Dependencies
-
-- The repository currently contains multiple workflow-specific dependency surfaces.
-- [action_module/](./action_module) and [posttrain/](./posttrain) provide the most directly reusable dependency lists for the public workflows.
-- [backbone/README.md](./backbone/README.md) and [backbone/TRAINING.md](./backbone/TRAINING.md) should be treated as the installation references for backbone training.
-- Some vendored legacy components under [posttrain/TSformer-VO-main/](./posttrain/TSformer-VO-main) carry older requirement files; these should only be installed if you specifically need those paths.
 
 ## Setup
 
@@ -87,7 +76,10 @@ Depending on the workflow, you may also need additional runtime assets that are 
 | UAV-Flow task JSON root | `UAVFLOW_TASK_JSON_ROOT` | `posttrain` remote simulator rollout |
 | Replay metadata | `REPLAY_META_DIR` | `posttrain` StageB |
 
-If you are using the post-training pipeline, the asset contract documented in [posttrain/README.md](./posttrain/README.md) should be treated as the source of truth.
+Notes:
+
+- The repository does not ship private checkpoints or dataset payloads; supply them through environment variables or explicit arguments.
+- Do not commit local runtime artifacts (caches, logs, checkpoints) back into the repository.
 
 ## Inference
 
@@ -103,40 +95,142 @@ The online service lives under [infer/](./infer) and is intended for deployment-
 
 At a high level, this service consumes the current observation context and model inputs, then returns action predictions through the API server.
 
+#### Quick start
+
+From the repository root:
+
+```bash
+export PYTHON_BIN=$(which python)
+export INFINITY_CKPT=/path/to/infinity/global_step_xxx.pth
+export STAGE2_LATENT2ACTION_CKPT=/path/to/stage2_latent2action_combined.pt
+
+bash infer/run_server.sh
+```
+
+Common environment variables:
+
+- `INFINITY_CKPT`: main InfinityStar / WorldVLN checkpoint used by the service
+- `STAGE2_LATENT2ACTION_CKPT`: Stage-2 latent-to-action checkpoint for action prediction
+- `INFINITY_SERVER_CONFIG`: optional override for `infer/config.json`
+- `INFINITY_REPO_ROOT`: optional override for the bundled `infer/InfinityStar-main/`
+- `INFINITY_LATENT_CACHE_ROOT`: runtime cache directory used by the service
+- `HOST`, `PORT`: bind address for Uvicorn
+
 ### Batch Latent-to-Action Inference
 
-The batch inference path lives under [action_module/](./action_module).
+This path is intended for **offline** inference and evaluation on route-level data (as opposed to online serving).
 
-- Entry point: [action_module/tools/predict_pose.py](./action_module/tools/predict_pose.py)
-- Evaluation script: [action_module/tools/eval_endpoints.py](./action_module/tools/eval_endpoints.py)
-- Input format: a route directory containing `latents.pt` and `preprocessed_logs.json`
-- Output: predicted actions or trajectory estimates written to the selected output directory
+The batch inference entrypoints live under `Train_WAM/action_decoder/`:
 
-This path is intended for offline inference and evaluation on route-level data rather than online serving.
+- Inference: [Train_WAM/action_decoder/tools/predict_pose.py](./Train_WAM/action_decoder/tools/predict_pose.py)
+- Evaluation: [Train_WAM/action_decoder/tools/eval_endpoints.py](./Train_WAM/action_decoder/tools/eval_endpoints.py)
+
+#### 1) Prepare route folders
+
+Each route directory under `--data_root` should contain:
+
+```text
+<route>/
+  latents.pt
+  preprocessed_logs.json
+```
+
+`preprocessed_logs.json` is a list of poses with layout `[x, y, z, roll, yaw, pitch]` (angles are treated as degrees by default).
+
+#### 2) Run batch inference
+
+From the repository root:
+
+```bash
+python Train_WAM/action_decoder/tools/predict_pose.py \
+  --ckpt <path/to/stage2_checkpoint>.pth \
+  --data_root <route_root_dir> \
+  --out_dir <output_root_dir> \
+  --infinitystar_root <path/to/InfinityStar-main> \
+  --infinitystar_vae_path <path/to/infinitystar_videovae.pth>
+```
+
+Outputs are written per-route under `--out_dir/<route>/` and include `pred_actions.json` and `pred_path.json` for downstream evaluation or integration.
+
+#### 3) Evaluate endpoints (optional)
+
+```bash
+python Train_WAM/action_decoder/tools/eval_endpoints.py \
+  --gt_root <gt_route_root_dir> \
+  --pred_root <output_root_dir> \
+  --out_root <eval_out_dir>
+```
 
 ## Training
 
 Training code is provided for multiple stages of the WorldVLN stack.
 
+![WorldVLN framework](./assets/framework.png)
+
 ### Backbone Training
 
-The backbone training workflow is located under [backbone/](./backbone).
+The backbone finetuning workflow is located under [Train_WAM/](./Train_WAM).
 
-- Entry point: [backbone/scripts/train_from_base.sh](./backbone/scripts/train_from_base.sh)
-- Main trainer: [backbone/train.py](./backbone/train.py)
-- Detailed guide: [backbone/TRAINING.md](./backbone/TRAINING.md)
+- Entry point: [Train_WAM/scripts/train_from_base.sh](./Train_WAM/scripts/train_from_base.sh)
+- Main trainer: [Train_WAM/train.py](./Train_WAM/train.py)
+- Detailed guide: [Train_WAM/TRAINING.md](./Train_WAM/TRAINING.md)
 
 Use this workflow when you want to fine-tune the WorldVLN backbone from base checkpoints.
 
+#### Quick start
+
+```bash
+bash Train_WAM/scripts/train_from_base.sh
+```
+
 ### Action Decoder Training
 
-The action decoder workflow is located under [action_module/](./action_module) and is organized into two stages.
+The action decoder workflow is located under [Train_WAM/action_decoder/](./Train_WAM/action_decoder) and is organized into two stages.
 
-- Stage 1 adapter distillation: [action_module/scripts/train_stage1_ddp.sh](./action_module/scripts/train_stage1_ddp.sh)
-- Stage 2 latent-to-action training: [action_module/scripts/train_stage2_ddp.sh](./action_module/scripts/train_stage2_ddp.sh)
-- Main scripts: [action_module/tools/train_stage1_ddp.py](./action_module/tools/train_stage1_ddp.py), [action_module/tools/train_stage2_ddp.py](./action_module/tools/train_stage2_ddp.py)
+- Stage 1 adapter distillation: [Train_WAM/action_decoder/scripts/train_stage1_ddp.sh](./Train_WAM/action_decoder/scripts/train_stage1_ddp.sh)
+- Stage 2 latent-to-action training: [Train_WAM/action_decoder/scripts/train_stage2_ddp.sh](./Train_WAM/action_decoder/scripts/train_stage2_ddp.sh)
+- Main scripts: [Train_WAM/action_decoder/tools/train_stage1_ddp.py](./Train_WAM/action_decoder/tools/train_stage1_ddp.py), [Train_WAM/action_decoder/tools/train_stage2_ddp.py](./Train_WAM/action_decoder/tools/train_stage2_ddp.py)
 
-This workflow trains the mapping from visual latent features to 6-DoF motion outputs. Input manifest structure and data expectations are documented in [action_module/README.md](./action_module/README.md).
+This workflow trains the mapping from visual latent features to 6-DoF motion outputs.
+
+Data contract (training manifest):
+
+```json
+{
+  "items_train": [
+    {
+      "latent_path": "path/to/latents.pt",
+      "traj_json_path": "path/to/preprocessed_logs.json",
+      "images_dir": "path/to/images"
+    }
+  ]
+}
+```
+
+Stage 1 required environment variables:
+
+- `MANIFEST_JSON`
+- `TSFORMER_CKPT`
+- `INF_VAE_PATH`
+
+Run Stage 1:
+
+```bash
+bash Train_WAM/action_decoder/scripts/train_stage1_ddp.sh
+```
+
+Stage 2 required environment variables:
+
+- `MANIFEST_JSON`
+- `TSFORMER_PRETRAINED`
+- `ADAPTER_CKPT`
+- `INFINITYSTAR_VAE_PATH`
+
+Run Stage 2:
+
+```bash
+bash Train_WAM/action_decoder/scripts/train_stage2_ddp.sh
+```
 
 ### Post-Training
 
@@ -152,8 +246,49 @@ At a high level:
 - StageA consumes rollout sources and model assets, then generates rollout caches and replay metadata.
 - StageB consumes replay metadata and runs post-training to produce updated checkpoints and logs.
 
-For simulator-backed rollout and more detailed asset requirements, see [posttrain/README.md](./posttrain/README.md) and [posttrain/docs/remote_sim.md](./posttrain/docs/remote_sim.md).
+#### Quick start (StageA + StageB)
+
+Start the local inference service used by StageA:
+
+```bash
+INFINITY_CKPT=/path/to/infinity/global_step_xxx.pth \
+CHECKPOINTS_DIR=/path/to/checkpointsinf \
+ACTIONHEAD_CKPT=/path/to/actionhead/checkpoint_last.pth \
+ACTIONHEAD_RUN_CONFIG=/path/to/actionhead/run_config.json \
+bash posttrain/run_infer_server.sh
+```
+
+Run StageA rollout collection:
+
+```bash
+SRC_JSON=/path/to/reference_video_full_49f_trajectory_prompts.json \
+INFINITY_CKPT=/path/to/infinity/global_step_xxx.pth \
+CHECKPOINTS_DIR=/path/to/checkpointsinf \
+ACTIONHEAD_CKPT=/path/to/actionhead/checkpoint_last.pth \
+ACTIONHEAD_RUN_CONFIG=/path/to/actionhead/run_config.json \
+UAVFLOW_STAGEA_ROLLOUT_BACKEND=remote_sim \
+UAVFLOW_SIMULATOR_BASE_URL=http://127.0.0.1:18765 \
+UAVFLOW_TASK_JSON_ROOT=/path/to/UAV-Flow-Eval/test_jsons \
+bash posttrain/scripts/run_stagea_collect.sh RUN_ID=remote_sim_smoke TOP_N=1 K_CAND=1 STAGEA_NPROC=1
+```
+
+Run StageB partial-freeze optimization:
+
+```bash
+CHECKPOINTS_DIR=/path/to/checkpointsinf \
+RUSH_RESUME=/path/to/infinity/global_step_xxx.pth \
+REPLAY_META_DIR=/path/to/replay_meta_stagea_smoke \
+bash posttrain/scripts/run_stageb_partialfreeze.sh PARTIAL_FREEZE_MODE=smoke RUN_ID=stageb_smoke
+```
+
+For simulator-backed rollout details, see [posttrain/docs/remote_sim.md](./posttrain/docs/remote_sim.md).
 
 ## License
 
-Please review the license files and documentation within each subdirectory before use.
+Please review the license files within each subdirectory before use:
+
+- `Train_WAM/LICENSE`
+- `Train_WAM/action_decoder/LICENSE`
+- `infer/InfinityStar-main/LICENSE`
+- `posttrain/InfinityStar-main/LICENSE`
+- `posttrain/TSformer-VO-main/LICENSE`
