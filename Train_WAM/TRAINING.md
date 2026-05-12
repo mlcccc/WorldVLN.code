@@ -1,27 +1,26 @@
 # Training Guide
 
-This training package keeps a single backbone finetuning entrypoint:
+This repository keeps a single training entrypoint:
 
-- `Train_WAM/scripts/train_from_base.sh` (run from the open-source repo root), or
-- `scripts/train_from_base.sh` (run after `cd Train_WAM`)
+- `scripts/train_from_base.sh`
 
-The script starts finetuning from the original sharded base weights and uses Train_WAM-root-relative defaults for data, checkpoints, and outputs.
+The script starts finetuning from the original sharded base weights and uses repository-relative defaults for data, checkpoints, and outputs.
 
 ## Open-source Readiness
 
 `scripts/train_from_base.sh` no longer contains machine-specific hard-coded paths such as `/home/...`, `/manifold-obs/...`, or old workspace locations.
 
-Default paths are resolved relative to the `Train_WAM/` directory:
+Default paths are resolved relative to the repository root:
 
-- checkpoints: `Train_WAM/checkpoints/`
-- data: `Train_WAM/data/`
-- outputs: `Train_WAM/outputs/`
+- checkpoints: `checkpoints/`
+- data: `data/`
+- outputs: `outputs/`
 
-The script still converts the Train_WAM root into an absolute runtime path for `PYTHONPATH`, but that path is derived from the local clone location at launch time and is portable across machines.
+The script still converts the repository root into an absolute runtime path for `PYTHONPATH`, but that path is derived from the local clone location at launch time and is portable across machines.
 
 ## Required Layout
 
-Expected layout (under the open-source repository root):
+Expected repository layout:
 
 ```text
 Train_WAM/
@@ -165,20 +164,13 @@ Outputs are written to:
 
 ## Quick Start
 
-Run from the open-source repository root:
+Run from the repository root:
 
 ```bash
-bash Train_WAM/scripts/train_from_base.sh
-```
-
-Or run from inside `Train_WAM/`:
-
-```bash
-cd Train_WAM
 bash scripts/train_from_base.sh
 ```
 
-With explicit overrides (either way):
+Or with explicit overrides:
 
 ```bash
 CHECKPOINTS_DIR=./checkpoints \
@@ -218,12 +210,12 @@ Common overrides:
 
 Before training, verify:
 
-1. `Train_WAM/train.py` exists.
-2. `Train_WAM/checkpoints/text_encoder/flan-t5-xl-official` exists (or `T5_PATH` points to a valid directory).
-3. `Train_WAM/checkpoints/infinitystar_videovae.pth` exists (or `VAE_PATH` points to a valid file).
-4. `Train_WAM/checkpoints/infinitystar_8b_480p_weights` exists (or `TORCHSHARD_RESUME_PATH` points to a valid directory).
-5. `VIDEO_DATA_PATH` points to a directory containing JSONL files (defaults under `Train_WAM/data/`).
+1. `train.py` exists in the repository root.
+2. `checkpoints/text_encoder/flan-t5-xl-official` exists.
+3. `checkpoints/infinitystar_videovae.pth` exists.
+4. `checkpoints/infinitystar_8b_480p_weights` exists.
+5. `VIDEO_DATA_PATH` points to a directory containing JSONL files.
 6. Every JSONL entry points to a readable local video file.
-7. Required Python dependencies from `requirements.txt` (open-source repository root) are installed.
+7. Required Python dependencies from `../requirements.txt` (repository root) are installed.
 
 If any required path is missing, the script exits immediately with an error.

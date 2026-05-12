@@ -1,41 +1,33 @@
-# 忽略 Python 缓存
+# Python
 __pycache__/
 *.py[cod]
+*.so
 
-# 忽略虚拟环境
+# Virtual environments
+.venv/
 venv/
 env/
 
-# 忽略数据集和日志文件 (请根据你的实际情况修改名字)
-dataset/
+# Local caches / runtime artifacts (do not commit)
+.cache/
+outputs/
 logs/
 checkpoints/
+data/
+dataset/
+
+# Common ML artifacts
 *.pth
 *.pt
+*.ckpt
+*.safetensors
+*.npy
+*.npz
 
-# 忽略 IDE 配置文件
+# IDE / OS
 .vscode/
 .idea/
-
-# local caches
-.cache/
-__pycache__/
-*.pyc
-
-# local caches
-.cache/
-__pycache__/
-*.pyc
-
-# local caches
-.cache/
-__pycache__/
-*.pyc
-
-# local caches
-.cache/
-__pycache__/
-*.pyc
+.DS_Store
 
 # local caches
 .cache/
