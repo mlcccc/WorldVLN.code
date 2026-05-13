@@ -5,7 +5,7 @@
 #
 # This file consolidates dependencies across:
 # - Worldmodel/action_decoder/src (latent-to-action training & batch inference)
-# - Worldmodel/runtime (RL workflows and shared world-model deps)
+# - Worldmodel/runtime (action-aware GRPO workflows and shared world-model deps)
 # - infer (online API service)
 
 -r Worldmodel/action_decoder/src/requirements.txt

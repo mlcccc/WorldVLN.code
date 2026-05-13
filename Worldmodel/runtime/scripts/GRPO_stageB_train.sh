@@ -86,7 +86,7 @@ KEEP_LATEST_CKPTS="${KEEP_LATEST_CKPTS:-0}"
 TLR="${TLR:-5e-6}"
 GRAD_CLIP="${GRAD_CLIP:-5.0}"
 GRPO_WEIGHT_MODE="${GRPO_WEIGHT_MODE:-raw_reward}"          # raw_reward | gate_mean | rank_gate
-GRPO_AUX_SFT_COEF="${GRPO_AUX_SFT_COEF:-0.0}"              # add coef * SFT loss to RL objective (optional)
+GRPO_AUX_SFT_COEF="${GRPO_AUX_SFT_COEF:-0.0}"              # add coef * SFT loss to GRPO objective (optional)
 GRPO_LAMBDA_ACT="${GRPO_LAMBDA_ACT:-1.0}"                  # weight for act-adv reward level
 GRPO_LAMBDA_TASK="${GRPO_LAMBDA_TASK:-1.0}"                # weight for task-adv reward level
 GRPO_LAMBDA_CE="${GRPO_LAMBDA_CE:-1.0}"                    # weight for CE-adv reward level (zscore-exp)
@@ -154,7 +154,7 @@ if [ ! -f "${ROLL_JSONL}" ]; then
   exit 1
 fi
 
-CHECKPOINTS_DIR="${CHECKPOINTS_DIR:-${REPO_ROOT}/reinforcement_learning/models/infinity}"
+CHECKPOINTS_DIR="${CHECKPOINTS_DIR:-${REPO_ROOT}/action_aware_grpo/models/infinity}"
 T5_PATH="${T5_PATH:-${CHECKPOINTS_DIR}/text_encoder/flan-t5-xl-official}"
 VAE_PATH="${VAE_PATH:-${CHECKPOINTS_DIR}/infinitystar_videovae.pth}"
 TORCHSHARD_RESUME_PATH="${TORCHSHARD_RESUME_PATH:-${CHECKPOINTS_DIR}/infinitystar_8b_480p_weights}"

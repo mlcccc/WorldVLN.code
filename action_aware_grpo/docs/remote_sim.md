@@ -41,7 +41,7 @@ curl --noproxy '*' http://127.0.0.1:18765/health
 The open-source reinforcement learning package keeps only remote_sim for rollout. Use the wrapper command below:
 
 ```bash
-cd ./reinforcement_learning
+cd ./action_aware_grpo
 
 unset ALL_PROXY all_proxy
 export NO_PROXY=127.0.0.1,localhost

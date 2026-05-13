@@ -93,11 +93,11 @@ TASK_REWARD_MODE="${TASK_REWARD_MODE:-raw_dense}"
 REQUIRE_ALL_TRAJECTORIES="${REQUIRE_ALL_TRAJECTORIES:-0}"
 REQUIRE_OLD_LOGPROB="${REQUIRE_OLD_LOGPROB:-1}"
 # Real rollout checkpoints/configs
-INFINITY_API_PY="${INFINITY_API_PY:-${REPO_ROOT}/reinforcement_learning/infinity_tsformer_api_server.py}"
-INFINITY_SERVER_CONFIG="${INFINITY_SERVER_CONFIG:-${REPO_ROOT}/reinforcement_learning/config.json}"
+INFINITY_API_PY="${INFINITY_API_PY:-${REPO_ROOT}/action_aware_grpo/infinity_tsformer_api_server.py}"
+INFINITY_SERVER_CONFIG="${INFINITY_SERVER_CONFIG:-${REPO_ROOT}/action_aware_grpo/config.json}"
 INFINITY_CKPT="${INFINITY_CKPT:-}"
 INFINITY_REPO_ROOT="${INFINITY_REPO_ROOT:-${ROOT_DIR}}"
-CHECKPOINTS_DIR="${CHECKPOINTS_DIR:-${REPO_ROOT}/reinforcement_learning/models/infinity}"
+CHECKPOINTS_DIR="${CHECKPOINTS_DIR:-${REPO_ROOT}/action_aware_grpo/models/infinity}"
 STAGEA_T5_PATH="${T5_PATH:-${CHECKPOINTS_DIR}/text_encoder/flan-t5-xl-official}"
 STAGEA_VAE_PATH="${VAE_PATH:-${CHECKPOINTS_DIR}/infinitystar_videovae.pth}"
 ACTIONHEAD_CKPT="${ACTIONHEAD_CKPT:-}"
@@ -181,7 +181,7 @@ if [ ! -d "${ACTIONHEAD_REPO_ROOT}" ]; then
 fi
 if [ "${UAVFLOW_STAGEA_ROLLOUT_BACKEND}" != "remote_sim" ]; then
   echo "[stageA][fatal] unsupported UAVFLOW_STAGEA_ROLLOUT_BACKEND=${UAVFLOW_STAGEA_ROLLOUT_BACKEND}"
-  echo "[stageA][fatal] open-source reinforcement_learning only keeps remote_sim for rollout."
+  echo "[stageA][fatal] open-source action_aware_grpo only keeps remote_sim for rollout."
   exit 1
 fi
 if [ -z "${UAVFLOW_TASK_JSON_ROOT}" ]; then
