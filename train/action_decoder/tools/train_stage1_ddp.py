@@ -623,8 +623,19 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--manifest_json", type=str, required=True)
     ap.add_argument("--items_key", type=str, default="ALL", help="Manifest key(s) to use; comma-separated, or ALL for every items_* list.")
+    ap.add_argument(
+        "--workspace_root",
+        type=str,
+        default="",
+        help=(
+            "Base directory for resolving relative paths inside manifest_json. "
+            "If empty, defaults to the open-source package root (the folder containing Worldmodel/ and train/). "
+            "Set this when your manifest paths are relative to a different root (e.g. the repo root above opensource/)."
+        ),
+    )
     ap.add_argument("--max_items", type=int, default=0)
-    ap.add_argument("--require_T", type=int, default=49)
+    # Match legacy stage1 launcher defaults: do not enforce fixed frame length.
+    ap.add_argument("--require_T", type=int, default=0)
 
     ap.add_argument("--tsformer_ckpt", type=str, required=True)
     ap.add_argument("--infinitystar_vae_path", type=str, required=True)
@@ -640,33 +651,45 @@ def main():
     ap.add_argument("--semantic_scales", type=int, default=11)
 
     ap.add_argument("--out_dir", type=str, required=True)
-    ap.add_argument("--epochs", type=int, default=80)
-    ap.add_argument("--global_batch_size", type=int, default=0)
+    # Match legacy stage1 launcher defaults.
+    ap.add_argument("--epochs", type=int, default=100)
+    ap.add_argument("--global_batch_size", type=int, default=32)
     ap.add_argument("--batch_size", type=int, default=4)
-    ap.add_argument("--num_workers", type=int, default=4)
-    ap.add_argument("--persistent_workers", action="store_true", default=False)
+    ap.add_argument("--num_workers", type=int, default=8)
+    ap.add_argument(
+        "--persistent_workers",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable persistent DataLoader workers (recommended when num_workers>0).",
+    )
     ap.add_argument("--prefetch_factor", type=int, default=2)
-    ap.add_argument("--collate_mode", type=str, default="crop", choices=["crop", "per_sample"])
+    ap.add_argument("--collate_mode", type=str, default="per_sample", choices=["crop", "per_sample"])
 
-    ap.add_argument("--lr", type=float, default=1e-4)
+    ap.add_argument("--lr", type=float, default=5e-5)
     ap.add_argument("--weight_decay", type=float, default=0.0)
     ap.add_argument("--seed", type=int, default=2026)
-    ap.add_argument("--save_every", type=int, default=1)
+    ap.add_argument("--save_every", type=int, default=4)
     ap.add_argument("--log_every", type=int, default=20)
     ap.add_argument("--tqdm", action="store_true", default=False)
     ap.add_argument("--log_file", type=str, default="train.log")
     ap.add_argument("--log_dir", type=str, default="")
-    ap.add_argument("--amp", action="store_true", default=False)
-    ap.add_argument("--grad_clip", type=float, default=1.0, help="max grad norm; 0 to disable")
+    ap.add_argument(
+        "--amp",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable AMP mixed precision (recommended). Use --no-amp to disable.",
+    )
+    ap.add_argument("--grad_clip", type=float, default=2.0, help="max grad norm; 0 to disable")
 
+    # Legacy launcher default: cosine + MSE schedule (mean/std disabled by default).
     ap.add_argument("--loss_cosine_w", type=float, default=1.0)
-    ap.add_argument("--loss_mean_w", type=float, default=0.1)
-    ap.add_argument("--loss_std_w", type=float, default=0.1)
-    ap.add_argument("--loss_mse_w", type=float, default=0.0)
+    ap.add_argument("--loss_mean_w", type=float, default=0.0)
+    ap.add_argument("--loss_std_w", type=float, default=0.0)
+    ap.add_argument("--loss_mse_w", type=float, default=0.1)
     ap.add_argument(
         "--loss_schedule",
         type=str,
-        default="none",
+        default="piecewise_linear",
         choices=["none", "piecewise_linear"],
         help="Optional epoch-wise schedule for loss weights. 'piecewise_linear' uses 1-indexed epoch boundaries.",
     )
@@ -677,18 +700,28 @@ def main():
     ap.add_argument("--loss_cosine_w_end", type=float, default=0.1)
     ap.add_argument("--loss_mse_w_start", type=float, default=0.1)
     ap.add_argument("--loss_mse_w_end", type=float, default=1.0)
-    ap.add_argument("--adapter_frames_chunk", type=int, default=8, help="adapter forward temporal chunk size; lower to save memory")
-    ap.add_argument("--adapter_use_checkpoint", action="store_true", default=False, help="use torch.utils.checkpoint for adapter forward to save memory")
+    ap.add_argument("--adapter_frames_chunk", type=int, default=2, help="adapter forward temporal chunk size; lower to save memory")
+    ap.add_argument(
+        "--adapter_use_checkpoint",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use torch.utils.checkpoint for adapter forward to save memory (more compute). Use --no-adapter_use_checkpoint to disable.",
+    )
 
     ap.add_argument("--latent_chunk_len", type=int, default=3)
     # Compatibility alias (some launch wrappers inject this flag).
     ap.add_argument("--min_latent_t", type=int, default=None)
     # If set, choose a random window start for each sample (when not using full latent).
-    ap.add_argument("--latent_chunk_random", action="store_true", default=False)
+    ap.add_argument("--latent_chunk_random", action=argparse.BooleanOptionalAction, default=False)
     # If set, use the full latent sequence (no windowing). This ensures all temporal parts participate in distillation.
-    ap.add_argument("--latent_use_full", action="store_true", default=False)
+    ap.add_argument(
+        "--latent_use_full",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use full latent sequence (no windowing). Use --no-latent_use_full to disable.",
+    )
     # If set, enumerate all windows for each latent (covers all parts without decoding the full sequence at once).
-    ap.add_argument("--latent_cover_all", action="store_true", default=False)
+    ap.add_argument("--latent_cover_all", action=argparse.BooleanOptionalAction, default=False)
     ap.add_argument("--latent_stride", type=int, default=1)
     ap.add_argument("--latent_max_windows", type=int, default=0, help="0 means all windows")
 
@@ -863,10 +896,11 @@ def main():
     # dataset
     require_T = None if int(args.require_T) == 0 else int(args.require_T)
     png_tf = _build_png_transform()
+    ws_root = str(args.workspace_root).strip() or _OPEN_ROOT
     ds_kwargs = dict(
         manifest_json=str(args.manifest_json),
         items_key=str(args.items_key),
-        workspace_root=_OPEN_ROOT,
+        workspace_root=ws_root,
         transform=png_tf,
         load_frames=True,
         max_items=(int(args.max_items) if int(args.max_items) > 0 else None),

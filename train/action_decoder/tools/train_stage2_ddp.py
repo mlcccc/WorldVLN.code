@@ -631,7 +631,8 @@ def main():
     ap.add_argument("--manifest_json", type=str, required=True)
     ap.add_argument("--items_key", type=str, default="ALL", help="Manifest key(s) to use; comma-separated, or ALL for every items_* list.")
     ap.add_argument("--max_items", type=int, default=0)
-    ap.add_argument("--require_T", type=int, default=49)
+    # Match legacy stage2 launcher defaults: do not enforce fixed T.
+    ap.add_argument("--require_T", type=int, default=0)
 
     ap.add_argument("--tsformer_pretrained", type=str, required=True)
     ap.add_argument("--adapter_ckpt", type=str, required=True)
@@ -656,38 +657,39 @@ def main():
     ap.add_argument("--semantic_scales", type=int, default=11)
 
     ap.add_argument("--out_dir", type=str, required=True)
-    ap.add_argument("--epochs", type=int, default=2)
-    ap.add_argument("--global_batch_size", type=int, default=0)
+    # Match legacy stage2 launcher defaults.
+    ap.add_argument("--epochs", type=int, default=60)
+    ap.add_argument("--global_batch_size", type=int, default=8)
     ap.add_argument("--batch_size", type=int, default=1)
     ap.add_argument("--window_stride", type=int, default=1)
-    ap.add_argument("--windows_chunk", type=int, default=8)
+    ap.add_argument("--windows_chunk", type=int, default=24)
 
-    ap.add_argument("--num_workers", type=int, default=2)
-    ap.add_argument("--persistent_workers", action="store_true", default=False)
+    ap.add_argument("--num_workers", type=int, default=16)
+    ap.add_argument("--persistent_workers", action="store_true", default=True)
     ap.add_argument("--prefetch_factor", type=int, default=2)
-    ap.add_argument("--collate_mode", type=str, default="crop", choices=["crop", "per_sample"])
+    ap.add_argument("--collate_mode", type=str, default="per_sample", choices=["crop", "per_sample"])
 
     ap.add_argument("--lr", type=float, default=1e-5)
     ap.add_argument("--head_lr_mult", type=float, default=10.0)
-    ap.add_argument("--adapter_lr_mult", type=float, default=1.0)
-    ap.add_argument("--weight_decay", type=float, default=0.0)
+    ap.add_argument("--adapter_lr_mult", type=float, default=2.0)
+    ap.add_argument("--weight_decay", type=float, default=0.01)
     ap.add_argument(
         "--grad_accum_steps",
         type=int,
-        default=1,
+        default=3,
         help="Gradient accumulation steps. Optimizer step happens every N loader iterations (no microbatching within a sample).",
     )
-    ap.add_argument("--grad_clip", type=float, default=0.0, help="Max gradient norm for clipping (0 = disabled)")
+    ap.add_argument("--grad_clip", type=float, default=1.0, help="Max gradient norm for clipping (0 = disabled)")
     ap.add_argument("--seed", type=int, default=2026)
-    ap.add_argument("--save_every", type=int, default=1)
+    ap.add_argument("--save_every", type=int, default=2)
     ap.add_argument("--log_every", type=int, default=20)
     ap.add_argument("--tqdm", action="store_true", default=False)
     ap.add_argument("--log_file", type=str, default="train.log")
     ap.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
-    ap.add_argument("--amp", action="store_true", default=False)
+    ap.add_argument("--amp", action="store_true", default=True)
 
     # loss config
-    ap.add_argument("--translation_divisor", type=float, default=1.0)
+    ap.add_argument("--translation_divisor", type=float, default=100.0)
     ap.add_argument("--angles_in_degrees", action="store_true", default=True)
     ap.add_argument(
         "--traj_mode",
@@ -704,22 +706,22 @@ def main():
         choices=["auto", "deg", "rad"],
         help="When traj_mode=delta, interpret dz(dyaw) unit. auto uses magnitude heuristic.",
     )
-    ap.add_argument("--rot_loss_weight_start", type=float, default=0.0)
-    ap.add_argument("--rot_loss_weight_max", type=float, default=0.0)
-    ap.add_argument("--rot_warmup_epochs", type=int, default=0)
+    ap.add_argument("--rot_loss_weight_start", type=float, default=0.05)
+    ap.add_argument("--rot_loss_weight_max", type=float, default=0.25)
+    ap.add_argument("--rot_warmup_epochs", type=int, default=15)
     ap.add_argument("--trans_xy_weight", type=float, default=1.0)
     ap.add_argument("--trans_z_weight", type=float, default=2.0)
     ap.add_argument("--trans_z_weight_start", type=float, default=None)
     ap.add_argument("--trans_z_weight_end", type=float, default=None)
-    ap.add_argument("--trans_z_decay_epochs", type=int, default=0)
+    ap.add_argument("--trans_z_decay_epochs", type=int, default=12)
     ap.add_argument("--trans_vertical_index", type=int, default=2)
 
     # train switches
-    ap.add_argument("--train_adapter", action="store_true", default=False)
-    ap.add_argument("--freeze_adapter_epochs", type=int, default=0, help="Freeze adapter for the first N epochs so TSformer can adapt to its token distribution")
+    ap.add_argument("--train_adapter", action="store_true", default=True)
+    ap.add_argument("--freeze_adapter_epochs", type=int, default=6, help="Freeze adapter for the first N epochs so TSformer can adapt to its token distribution")
     ap.add_argument("--freeze_backbone_epochs", type=int, default=0)
-    ap.add_argument("--train_vae_after_epoch", type=int, default=0)
-    ap.add_argument("--vae_lr_mult", type=float, default=0.1)
+    ap.add_argument("--train_vae_after_epoch", type=int, default=999999)
+    ap.add_argument("--vae_lr_mult", type=float, default=0.0)
     ap.add_argument("--vae_disable_slicing", action="store_true", default=False)
     ap.add_argument("--vae_disable_tiling", action="store_true", default=False)
     ap.add_argument("--vae_num_sample_frames_batch_size", type=int, default=0)

@@ -1,0 +1,223 @@
+[log] writing rank0 logs to /ML-vePFS/research_gen/vln_uav/opensource/train/action_decoder/tmp/train.log
+[config] rank=0 world_size=8 device=cuda:0 cuda=True amp=False
+[config] args:
+{
+  "adapter_frames_chunk": 8,
+  "adapter_use_checkpoint": false,
+  "amp": false,
+  "batch_size": 4,
+  "collate_mode": "crop",
+  "detail_scale_dim": 64,
+  "detail_scale_min_tokens": 350,
+  "epochs": 80,
+  "export_combined": true,
+  "export_name": "infinitystar_up3_plus_adapter_latent2tokens.pt",
+  "global_batch_size": 0,
+  "grad_clip": 1.0,
+  "infinitystar_root": "",
+  "infinitystar_vae_path": "/manifold-obs/vln-uav/checkpointsinf/infinitystar_videovae.pth",
+  "infinitystar_vae_type": 64,
+  "items_key": "ALL",
+  "latent_chunk_len": 3,
+  "latent_chunk_random": false,
+  "latent_cover_all": false,
+  "latent_max_windows": 0,
+  "latent_stride": 1,
+  "latent_use_full": false,
+  "log_dir": "/ML-vePFS/research_gen/vln_uav/opensource/train/action_decoder/tmp",
+  "log_every": 20,
+  "log_file": "train.log",
+  "loss_cosine_w": 1.0,
+  "loss_cosine_w_end": 0.1,
+  "loss_cosine_w_start": 1.0,
+  "loss_hold_epochs": 40,
+  "loss_mean_w": 0.1,
+  "loss_mse_w": 0.0,
+  "loss_mse_w_end": 1.0,
+  "loss_mse_w_start": 0.1,
+  "loss_ramp_end_epoch": 55,
+  "loss_ramp_start_epoch": 45,
+  "loss_schedule": "none",
+  "loss_std_w": 0.1,
+  "lr": 0.0001,
+  "manifest_json": "/ML-vePFS/research_gen/vln_uav/49frame_dataset/latent_traj_manifest.json",
+  "max_items": 0,
+  "min_latent_t": null,
+  "num_workers": 4,
+  "out_dir": "/ML-vePFS/research_gen/vln_uav/opensource/train/action_decoder/tmp",
+  "persistent_workers": false,
+  "prefetch_factor": 2,
+  "require_T": 49,
+  "resume": "",
+  "save_every": 1,
+  "seed": 2026,
+  "semantic_scale_dim": 16,
+  "semantic_scales": 11,
+  "tqdm": true,
+  "tsformer_ckpt": "/ML-vePFS/research_gen/vln_uav/Actiondecoder/TSformer-VO-main/checkpoint/checkpoint_model3_exp20.pth",
+  "use_feat_proj": 2,
+  "use_learnable_dim_proj": 0,
+  "vae_disable_slicing": false,
+  "vae_disable_tiling": false,
+  "vae_num_sample_frames_batch_size": 0,
+  "weight_decay": 0.0,
+  "workspace_root": "/ML-vePFS/research_gen/vln_uav"
+}
+[stage1] items=10192 batch_size=4 global_batch_size=32 latent_chunk_len=3 latent_use_full=False latent_cover_all=False expected_T=9
+[loss_w] epoch=1/80 schedule=none w_cos=1.000000 w_mse=0.000000 w_mean=0.100000 w_std=0.100000
+[dl] got batch at step=1 data_s=1.771
+[step] pre_decode step=1 z_sub=(1, 64, 3, 16, 16)
+[step] post_decode step=1 decoded_T=9
+[log] writing rank0 logs to /ML-vePFS/research_gen/vln_uav/opensource/train/action_decoder/tmp/train.log
+[config] rank=0 world_size=8 device=cuda:0 cuda=True amp=False
+[config] args:
+{
+  "adapter_frames_chunk": 8,
+  "adapter_use_checkpoint": false,
+  "amp": false,
+  "batch_size": 4,
+  "collate_mode": "crop",
+  "detail_scale_dim": 64,
+  "detail_scale_min_tokens": 350,
+  "epochs": 80,
+  "export_combined": true,
+  "export_name": "infinitystar_up3_plus_adapter_latent2tokens.pt",
+  "global_batch_size": 0,
+  "grad_clip": 1.0,
+  "infinitystar_root": "",
+  "infinitystar_vae_path": "/manifold-obs/vln-uav/checkpointsinf/infinitystar_videovae.pth",
+  "infinitystar_vae_type": 64,
+  "items_key": "ALL",
+  "latent_chunk_len": 3,
+  "latent_chunk_random": false,
+  "latent_cover_all": false,
+  "latent_max_windows": 0,
+  "latent_stride": 1,
+  "latent_use_full": false,
+  "log_dir": "/ML-vePFS/research_gen/vln_uav/opensource/train/action_decoder/tmp",
+  "log_every": 20,
+  "log_file": "train.log",
+  "loss_cosine_w": 1.0,
+  "loss_cosine_w_end": 0.1,
+  "loss_cosine_w_start": 1.0,
+  "loss_hold_epochs": 40,
+  "loss_mean_w": 0.1,
+  "loss_mse_w": 0.0,
+  "loss_mse_w_end": 1.0,
+  "loss_mse_w_start": 0.1,
+  "loss_ramp_end_epoch": 55,
+  "loss_ramp_start_epoch": 45,
+  "loss_schedule": "none",
+  "loss_std_w": 0.1,
+  "lr": 0.0001,
+  "manifest_json": "/ML-vePFS/research_gen/vln_uav/49frame_dataset/latent_traj_manifest.json",
+  "max_items": 0,
+  "min_latent_t": null,
+  "num_workers": 4,
+  "out_dir": "/ML-vePFS/research_gen/vln_uav/opensource/train/action_decoder/tmp",
+  "persistent_workers": false,
+  "prefetch_factor": 2,
+  "require_T": 49,
+  "resume": "",
+  "save_every": 1,
+  "seed": 2026,
+  "semantic_scale_dim": 16,
+  "semantic_scales": 11,
+  "tqdm": true,
+  "tsformer_ckpt": "/ML-vePFS/research_gen/vln_uav/Actiondecoder/TSformer-VO-main/checkpoint/checkpoint_model3_exp20.pth",
+  "use_feat_proj": 2,
+  "use_learnable_dim_proj": 0,
+  "vae_disable_slicing": false,
+  "vae_disable_tiling": false,
+  "vae_num_sample_frames_batch_size": 0,
+  "weight_decay": 0.0,
+  "workspace_root": "/ML-vePFS/research_gen/vln_uav"
+}
+[stage1] items=10192 batch_size=4 global_batch_size=32 latent_chunk_len=3 latent_use_full=False latent_cover_all=False expected_T=9
+[loss_w] epoch=1/80 schedule=none w_cos=1.000000 w_mse=0.000000 w_mean=0.100000 w_std=0.100000
+[dl] got batch at step=1 data_s=1.446
+[step] pre_decode step=1 z_sub=(1, 64, 3, 16, 16)
+[step] post_decode step=1 decoded_T=9
+[log] writing rank0 logs to /ML-vePFS/research_gen/vln_uav/opensource/train/action_decoder/tmp/train.log
+[config] rank=0 world_size=8 device=cuda:0 cuda=True amp=True
+[config] args:
+{
+  "adapter_frames_chunk": 2,
+  "adapter_use_checkpoint": true,
+  "amp": true,
+  "batch_size": 4,
+  "collate_mode": "per_sample",
+  "detail_scale_dim": 64,
+  "detail_scale_min_tokens": 350,
+  "epochs": 100,
+  "export_combined": true,
+  "export_name": "infinitystar_up3_plus_adapter_latent2tokens.pt",
+  "global_batch_size": 32,
+  "grad_clip": 2.0,
+  "infinitystar_root": "",
+  "infinitystar_vae_path": "/manifold-obs/vln-uav/checkpointsinf/infinitystar_videovae.pth",
+  "infinitystar_vae_type": 64,
+  "items_key": "ALL",
+  "latent_chunk_len": 3,
+  "latent_chunk_random": false,
+  "latent_cover_all": false,
+  "latent_max_windows": 0,
+  "latent_stride": 1,
+  "latent_use_full": true,
+  "log_dir": "/ML-vePFS/research_gen/vln_uav/opensource/train/action_decoder/tmp",
+  "log_every": 20,
+  "log_file": "train.log",
+  "loss_cosine_w": 1.0,
+  "loss_cosine_w_end": 0.1,
+  "loss_cosine_w_start": 1.0,
+  "loss_hold_epochs": 40,
+  "loss_mean_w": 0.0,
+  "loss_mse_w": 0.1,
+  "loss_mse_w_end": 1.0,
+  "loss_mse_w_start": 0.1,
+  "loss_ramp_end_epoch": 55,
+  "loss_ramp_start_epoch": 45,
+  "loss_schedule": "piecewise_linear",
+  "loss_std_w": 0.0,
+  "lr": 5e-05,
+  "manifest_json": "/ML-vePFS/research_gen/vln_uav/49frame_dataset/latent_traj_manifest.json",
+  "max_items": 0,
+  "min_latent_t": null,
+  "num_workers": 8,
+  "out_dir": "/ML-vePFS/research_gen/vln_uav/opensource/train/action_decoder/tmp",
+  "persistent_workers": true,
+  "prefetch_factor": 2,
+  "require_T": 0,
+  "resume": "",
+  "save_every": 4,
+  "seed": 2026,
+  "semantic_scale_dim": 16,
+  "semantic_scales": 11,
+  "tqdm": true,
+  "tsformer_ckpt": "/ML-vePFS/research_gen/vln_uav/Actiondecoder/TSformer-VO-main/checkpoint/checkpoint_model3_exp20.pth",
+  "use_feat_proj": 2,
+  "use_learnable_dim_proj": 0,
+  "vae_disable_slicing": false,
+  "vae_disable_tiling": false,
+  "vae_num_sample_frames_batch_size": 0,
+  "weight_decay": 0.0,
+  "workspace_root": "/ML-vePFS/research_gen/vln_uav"
+}
+[batch] global_batch_size=32 world_size=8 per_gpu_batch=4
+[stage1] items=10192 batch_size=4 global_batch_size=32 latent_chunk_len=3 latent_use_full=True latent_cover_all=False expected_T=None
+[loss_w] epoch=1/100 schedule=piecewise_linear w_cos=1.000000 w_mse=0.100000 w_mean=0.000000 w_std=0.000000
+[dl] got batch at step=1 data_s=3.562
+[step] pre_decode step=1 z_sub=(1, 64, 13, 16, 16)
+[step] post_decode step=1 decoded_T=49
+[step] epoch=1/100 step=1 loss=1.146775 cos=1.01446 mse=1.20040 avg=1.146775 valid=4 bw=4 skip_short=0 skip_decode=0 skip_no_frames=0 data_s=3.562 step_s=7.201
+[dl] got batch at step=2 data_s=0.000
+[step] pre_decode step=2 z_sub=(1, 64, 4, 16, 16)
+[step] post_decode step=2 decoded_T=13
+[step] epoch=1/100 step=2 loss=0.815915 cos=0.66936 mse=0.91926 avg=0.981345 valid=4 bw=4 skip_short=0 skip_decode=0 skip_no_frames=0 data_s=0.000 step_s=1.638
+[dl] got batch at step=3 data_s=0.000
+[step] pre_decode step=3 z_sub=(1, 64, 13, 16, 16)
+[step] post_decode step=3 decoded_T=49
+[step] epoch=1/100 step=3 loss=0.655267 cos=0.61952 mse=0.84384 avg=0.872652 valid=4 bw=4 skip_short=0 skip_decode=0 skip_no_frames=0 data_s=0.000 step_s=1.714
+[step] epoch=1/100 step=4 loss=0.482784 cos=0.42278 mse=0.68424 avg=0.775185 valid=4 bw=4 skip_short=0 skip_decode=0 skip_no_frames=0 data_s=0.000 step_s=1.462
+[step] epoch=1/100 step=5 loss=0.458751 cos=0.41239 mse=0.68008 avg=0.711898 valid=4 bw=4 skip_short=0 skip_decode=0 skip_no_frames=0 data_s=0.000 step_s=4.128
+[step] epoch=1/100 step=6 loss=0.404701 cos=0.30677 mse=0.58818 avg=0.660699 valid=4 bw=4 skip_short=0 skip_decode=0 skip_no_frames=0 data_s=0.000 step_s=4.489

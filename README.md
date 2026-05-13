@@ -1,7 +1,7 @@
 # WorldVLN: Autoregressive World Action Model for Aerial Vision-Language Navigation
 
 
-This is the official code repository for WorldVLN. The repository includes the main code paths used for backbone training, action decoding, inference serving, and post-training workflows.
+This is the official code repository for WorldVLN. The repository includes the main code paths used for backbone training, action decoding, inference serving, and RL workflows.
 
 ## Overview
 
@@ -12,9 +12,9 @@ The current codebase is organized into three major components:
 | [Worldmodel/](./Worldmodel) | Model code. `runtime/` is shared by `infer/` and RL workflows; `infinity/` provides the Python package used by `train/`; `action_decoder/` contains the latent-to-action decoder architecture and runtime action head. |
 | [train/](./train) | Backbone finetuning launcher (uses `Worldmodel/infinity/`). |
 | [infer/](./infer) | Online inference service for serving the model as an API. |
-| [reinforcement_learning/](./reinforcement_learning) | RL post-training workflows: **rollout** collection and **train** (optimization), including simulator-backed rollout support. |
+| [reinforcement_learning/](./reinforcement_learning) | RL workflows: **rollout** collection and **train** (optimization), including simulator-backed rollout support. |
 
-At a high level, `Worldmodel/` provides shared model code, `train/` covers backbone finetuning, `infer/` covers deployment-oriented inference, and `reinforcement_learning/` covers RL post-training workflows.
+At a high level, `Worldmodel/` provides shared model code, `train/` covers backbone finetuning, `infer/` covers deployment-oriented inference, and `reinforcement_learning/` covers RL workflows.
 
 ## Installation
 
@@ -33,7 +33,7 @@ conda create -n worldvln python=3.10
 conda activate worldvln
 ```
 
-2. Install a PyTorch build that matches your CUDA environment. For the released training and post-training workflows, a PyTorch 2.5.1 environment is the recommended baseline.
+2. Install a PyTorch build that matches your CUDA environment. For the released training and RL workflows, a PyTorch 2.5.1 environment is the recommended baseline.
 
 3. Install the shared dependencies used by the released workflows.
 
@@ -154,11 +154,16 @@ python train/action_decoder/tools/eval_endpoints.py \
 
 ## Training
 
-Training code is provided for multiple stages of the WorldVLN stack.
+This repository is organized into two stages:
+
+- **Stage 1 (supervised)**: backbone finetuning + action decoder training.
+- **Stage 2 (RL)**: rollout collection + RL training.
 
 ![WorldVLN framework](./assets/framework.png)
 
-### Backbone Training
+### Stage 1: Supervised Training
+
+#### Backbone Training
 
 The backbone finetuning workflow is located under [train/](./train).
 
@@ -174,7 +179,7 @@ Use this workflow when you want to fine-tune the WorldVLN backbone from base che
 bash train/scripts/train_from_base.sh
 ```
 
-### Action Decoder Training
+#### Action Decoder Training
 
 The action decoder workflow is located under [Worldmodel/action_decoder/src/](./Worldmodel/action_decoder/src) and is organized into two stages.
 
@@ -225,9 +230,9 @@ Run Stage 2:
 bash train/action_decoder/scripts/train_stage2_ddp.sh
 ```
 
-### Post-Training
+### Stage 2: Reinforcement Learning (RL)
 
-The RL post-training workflow is located under [reinforcement_learning/](./reinforcement_learning) and is organized into two steps: **rollout** and **train**.
+The RL workflow is located under [reinforcement_learning/](./reinforcement_learning) and is organized into two steps: **rollout** and **train**.
 
 - Rollout collection: [reinforcement_learning/scripts/run_stagea_collect.sh](./reinforcement_learning/scripts/run_stagea_collect.sh)
 - Train (partial-freeze optimization): [reinforcement_learning/scripts/run_stageb_partialfreeze.sh](./reinforcement_learning/scripts/run_stageb_partialfreeze.sh)
@@ -237,7 +242,7 @@ The RL post-training workflow is located under [reinforcement_learning/](./reinf
 At a high level:
 
 - Rollout consumes rollout sources and model assets, then generates rollout caches and replay metadata.
-- Train consumes replay metadata and runs post-training to produce updated checkpoints and logs.
+- Train consumes replay metadata and runs optimization to produce updated checkpoints and logs.
 
 #### Quick start (rollout + train)
 
