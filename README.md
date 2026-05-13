@@ -5,16 +5,19 @@ This is the official code repository for WorldVLN. The repository includes the m
 
 ## Overview
 
-The current codebase is organized into three major components:
+This repository is organized into two stages:
 
-| Directory | Description |
-| --- | --- |
-| [Worldmodel/](./Worldmodel) | Model code. `runtime/` is shared by `infer/` and RL workflows; `infinity/` provides the Python package used by `train/`; `action_decoder/` contains the latent-to-action decoder architecture and runtime action head. |
-| [train/](./train) | Backbone finetuning launcher (uses `Worldmodel/infinity/`). |
-| [infer/](./infer) | Online inference service for serving the model as an API. |
-| [reinforcement_learning/](./reinforcement_learning) | RL workflows: **rollout** collection and **train** (optimization), including simulator-backed rollout support. |
+- **Stage 1 (supervised)**: backbone finetuning + action decoder training.
+- **Stage 2 (RL)**: rollout collection + RL training.
 
-At a high level, `Worldmodel/` provides shared model code, `train/` covers backbone finetuning, `infer/` covers deployment-oriented inference, and `reinforcement_learning/` covers RL workflows.
+| Stage | Directory | Description |
+| --- | --- | --- |
+| Shared | [Worldmodel/](./Worldmodel) | Shared model code: `infinity/` (Python package), `runtime/` (shared by inference + RL), and `action_decoder/` (decoder architecture + runtime action head). |
+| Stage 1 | [train/](./train) | Supervised training launchers. Includes **backbone finetuning** (`train/scripts/train_from_base.sh`) and **action decoder training** (`train/action_decoder/`). |
+| Inference | [infer/](./infer) | Online inference service for serving the model as an API. |
+| Stage 2 | [reinforcement_learning/](./reinforcement_learning) | RL workflows: **rollout** collection and **train** (optimization), including simulator-backed rollout support. |
+
+At a high level, Stage 1 (supervised) uses `train/` with shared code from `Worldmodel/`, inference uses `infer/` with `Worldmodel/runtime/`, and Stage 2 (RL) uses `reinforcement_learning/` with `Worldmodel/runtime/`.
 
 ## Installation
 

@@ -720,7 +720,7 @@ def main():
     ap.add_argument("--train_adapter", action="store_true", default=True)
     ap.add_argument("--freeze_adapter_epochs", type=int, default=6, help="Freeze adapter for the first N epochs so TSformer can adapt to its token distribution")
     ap.add_argument("--freeze_backbone_epochs", type=int, default=0)
-    ap.add_argument("--train_vae_after_epoch", type=int, default=999999)
+    ap.add_argument("--train_vae_after_epoch", type=int, default=20)
     ap.add_argument("--vae_lr_mult", type=float, default=0.0)
     ap.add_argument("--vae_disable_slicing", action="store_true", default=False)
     ap.add_argument("--vae_disable_tiling", action="store_true", default=False)
