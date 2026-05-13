@@ -4,7 +4,7 @@ The remote_sim path keeps policy inference on the training host and delegates on
 
 ## Service Endpoints
 
-The simulator-side service is implemented by runtime/infinity_tsformer_client.py in service mode. It exposes:
+The simulator-side service is implemented by runtime/client.py in service mode. It exposes:
 
 - GET /health
 - POST /reset
@@ -15,7 +15,7 @@ The simulator-side service is implemented by runtime/infinity_tsformer_client.py
 On the simulator machine:
 
 ```bash
-python runtime/infinity_tsformer_client.py \
+python runtime/client.py \
   --mode service \
   --host 0.0.0.0 \
   --port 8765 \

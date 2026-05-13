@@ -6,7 +6,7 @@ This document is intended for maintainers who want to keep the `infer/` director
 
 The current public inference surface is built around:
 
-- `infinity_tsformer_api_server.py`
+- `server.py`
 - `run_server.sh`
 - `config.json`
 
@@ -14,7 +14,7 @@ The current public inference surface is built around:
 
 If you want to preserve only the `InfinityStar -> latent2action` online service path, the following code should remain available:
 
-- `infinity_tsformer_api_server.py`
+- `server.py`
 - `config.json`
 - `run_server.sh`
 - `../Worldmodel/runtime/infinity/`

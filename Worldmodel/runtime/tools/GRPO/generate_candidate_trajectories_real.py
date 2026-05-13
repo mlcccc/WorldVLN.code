@@ -352,7 +352,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--candidates_jsonl", type=str, required=True)
     ap.add_argument("--trajectory_root", type=str, required=True)
-    ap.add_argument("--api_py", type=str, required=True, help="Path to action_aware_grpo/infinity_tsformer_api_server.py")
+    ap.add_argument("--api_py", type=str, required=True, help="Path to action_aware_grpo/grpo_server.py")
     ap.add_argument("--infinity_server_config", type=str, required=True, help="Path to action_aware_grpo/config.json")
     ap.add_argument("--infinity_ckpt", type=str, required=True)
     ap.add_argument(

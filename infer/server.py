@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-InfinityStar + TSformer(P2P) 在线推理 API 服务（与 openfly_api_server.py 同款“权重常驻”架构）
+InfinityStar + latent2action 在线推理 API 服务（与 openfly_api_server.py 同款“权重常驻”架构）
 
 目标：
 - 服务启动时一次性加载 InfinityStar 与 TSformer 权重（常驻内存/GPU）
@@ -10,18 +10,19 @@ InfinityStar + TSformer(P2P) 在线推理 API 服务（与 openfly_api_server.py
   - 首次提交 1 帧
   - 后续可按 step 帧一批提交（也允许其它长度，但会累积到配置的 num_frames）
 - 服务端用 InfinityStar 在配置的 num_frames 下生成 summed_codes（latent，16 通道）
-- 取 summed_codes 的前 K 个 latent 时间步做 TSformer(P2P, window_size=2) 预测动作增量
-  - 第 0 段：K=5（对应像素帧 1..17），输出 4 个动作
-  - 第 i 段：K=5+4*i，取最后 4 个动作作为输出（每段覆盖 16 帧）
+- 默认动作头为 Stage2 latent2action：
+  - decoder feature -> adapter tokens -> TimesFormer sliding windows
+  - 每个 16 帧片段输出 16 个动作
+- 旧的 TSformer(P2P) 路径仍保留在离线工具里，仅用于兼容旧实验
 - 输出动作增量单位：平移 cm、角度 deg
 - 6 维动作顺序（与 UAVFlow 日志/训练一致）：[dx, dy, dz, droll, dyaw, dpitch]
 
 运行示例：
-  export INFINITY_CKPT=/path/to/global_step_xxx.pth
-  uvicorn infinity_tsformer_api_server:app --host 0.0.0.0 --port 8002
+  export INFINITY_CKPT=./checkpoints/infinity/global_step_xxx.pth
+  uvicorn server:app --host 0.0.0.0 --port 8002
 
 自测示例（需要真实 ckpt 与 route_dir）：
-  python3 infinity_tsformer_api_server.py --self_test \
+  python3 server.py --self_test \
     --infinity_ckpt "$INFINITY_CKPT" \
     --route_dir /path/to/route_dir
 """
@@ -76,9 +77,10 @@ except Exception:
 # 0) Paths / sys.path
 # -------------------------
 ROOT = Path(__file__).resolve().parent
-REPO = ROOT.parent
+REPO = ROOT
+PKG_ROOT = ROOT.parent
 
-TSFORMER_ROOT = REPO / "Worldmodel" / "action_decoder" / "actionhead_runtime"
+TSFORMER_ROOT = PKG_ROOT / "Worldmodel" / "action_decoder" / "actionhead_runtime"
 
 if not TSFORMER_ROOT.exists():
     raise FileNotFoundError(f"TSformer repo not found: {TSFORMER_ROOT}")
@@ -90,8 +92,8 @@ sys.path.insert(0, str(TSFORMER_ROOT))
 # 1) InfinityStar dynamic import (supports INFINITY_REPO_ROOT)
 # -------------------------
 # NOTE: Worldmodel repo is selected at runtime so this server can embed different
-# copies.
-DEFAULT_INFINITY_REPO_ROOT = REPO / "Worldmodel" / "runtime"
+# copies. The open-source layout keeps it at the repository root.
+DEFAULT_INFINITY_REPO_ROOT = PKG_ROOT / "Worldmodel" / "runtime"
 
 # Filled by _import_infinity_modules()
 InfinityStreamingSession = None  # type: ignore
@@ -154,8 +156,11 @@ def _import_infinity_modules(repo_root: Path) -> None:
 
 
 # -------------------------
-# 2) Action head only mode
+# 2) TSformer(P2P) imports
 # -------------------------
+# NOTE: The legacy P2P model is only used by offline utilities in this file.
+# Import it lazily inside `_load_tsformer_p2p()` to avoid hard dependencies (e.g. fvcore)
+# when running the HTTP service in Stage2 latent2action mode.
 
 
 # -------------------------
@@ -309,11 +314,9 @@ def _get_server_config() -> ServerConfig:
     else:
         cfg = ServerConfig()
 
-    # Allow env vars to override checkpoint paths.
-    # We intentionally let env take precedence so offline rollout can swap policies per-iteration
-    # without editing config.json (e.g., loop StageA->StageB->StageA).
+    # Backward compat: allow env vars to override ckpt paths if config omitted them.
     env_inf_ckpt = os.environ.get("INFINITY_CKPT", "").strip()
-    if env_inf_ckpt:
+    if env_inf_ckpt and not cfg.infinity.ckpt:
         cfg.infinity.ckpt = env_inf_ckpt
     env_ts_ckpt = os.environ.get("TS_P2P_CKPT", "").strip()
     if env_ts_ckpt:
@@ -321,40 +324,6 @@ def _get_server_config() -> ServerConfig:
     env_ts_stats = os.environ.get("TS_P2P_STATS", "").strip()
     if env_ts_stats:
         cfg.tsformer.stats = env_ts_stats
-
-    # Allow env vars to override runtime knobs even when config.json provides them.
-    # This is important for GRPO experiments where StageA must align with StageB's
-    # logprob scoring mode (e.g. teacher-forcing `trace_ce` expects cfg=1, tau=1).
-    try:
-        v = os.environ.get("INFINITY_CFG", "").strip()
-        if v:
-            cfg.infinity.cfg = float(v)
-    except Exception:
-        pass
-    try:
-        v = os.environ.get("INFINITY_TAU_IMAGE", "").strip()
-        if v:
-            cfg.infinity.tau_image = float(v)
-    except Exception:
-        pass
-    try:
-        v = os.environ.get("INFINITY_TAU_VIDEO", "").strip()
-        if v:
-            cfg.infinity.tau_video = float(v)
-    except Exception:
-        pass
-    try:
-        v = os.environ.get("INFINITY_TOP_K", "").strip()
-        if v:
-            cfg.infinity.top_k = int(float(v))
-    except Exception:
-        pass
-    try:
-        v = os.environ.get("INFINITY_TOP_P", "").strip()
-        if v:
-            cfg.infinity.top_p = float(v)
-    except Exception:
-        pass
 
     _SRV_CFG = cfg
     return cfg
@@ -409,6 +378,22 @@ _infinity_args = None
 _infinity_session_template: Optional[InfinityStreamingSession] = None
 _infinity_self_correction: Optional[SelfCorrection] = None
 
+# Stage-2 latent2action (decoder features -> adapter tokens -> TimesFormer sliding windows)
+# This replaces the old "TSformer(P2P) 5 latents -> 4 actions" behavior in `tsformer_latent` mode.
+DEFAULT_STAGE2_LATENT2ACTION_CKPT = os.environ.get(
+    "STAGE2_LATENT2ACTION_CKPT",
+    str((ROOT / "checkpoints" / "stage2_latent2action_combined.pt").resolve()),
+).strip()
+STAGE2_REPO_ROOT = (PKG_ROOT / "Worldmodel" / "action_decoder" / "src").resolve()
+_S2_WINDOW_SIZE = 4
+_S2_W_GRID = 40  # matches the stage2 latent2action training/inference setup
+
+_s2_tsformer: Optional[torch.nn.Module] = None
+_s2_adapter: Optional[torch.nn.Module] = None
+_s2_vae: Optional[torch.nn.Module] = None
+_s2_label_stats: Optional[Dict[str, torch.Tensor]] = None  # mean/std on device
+_s2_ckpt_path: Optional[str] = None
+
 _ts_model: Optional[torch.nn.Module] = None
 _ts_mean: Optional[torch.Tensor] = None
 _ts_std: Optional[torch.Tensor] = None
@@ -425,7 +410,7 @@ _AH_KITTI_STD = [0.30737526, 0.31515116, 0.32020183]
 _AH_TARGET_H = 192
 _AH_TARGET_W = 640
 
-DEFAULT_ACTIONHEAD_REPO_ROOT = REPO / "Worldmodel" / "action_decoder" / "actionhead_runtime"
+DEFAULT_ACTIONHEAD_REPO_ROOT = PKG_ROOT / "Worldmodel" / "action_decoder" / "actionhead_runtime"
 
 
 def _get_actionhead_repo_root() -> Path:
@@ -545,12 +530,588 @@ except Exception:
     _LOCK = None  # type: ignore
 
 
+def _safe_torch_load_any(path: str) -> object:
+    """
+    PyTorch 2.6 defaults weights_only=True, which can fail for combined checkpoints
+    containing numpy objects. We prefer weights_only=True, but fall back to
+    weights_only=False when needed (ONLY do this for trusted checkpoints).
+    """
+    try:
+        return torch.load(path, map_location="cpu", weights_only=True)
+    except TypeError:
+        return torch.load(path, map_location="cpu")
+    except Exception:
+        return torch.load(path, map_location="cpu", weights_only=False)
+
+
+def _is_safetensors_shard_dir(path: str | Path) -> bool:
+    path = Path(path)
+    if not path.is_dir():
+        return False
+    return any(path.glob("*.safetensors")) or any(path.glob("*.safetensors.index.json"))
+
+
+def _nested_dict_get(obj: object, dotted_path: str) -> object | None:
+    current = obj
+    for part in dotted_path.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def _load_state_dict_from_safetensors_dir(path: str | Path, device: str | torch.device = "cpu") -> Dict[str, torch.Tensor]:
+    from safetensors import safe_open
+
+    path = Path(path).expanduser().resolve()
+    target_device = str(device)
+    state_dict: Dict[str, torch.Tensor] = {}
+    alias_map: Dict[str, str] = {}
+
+    def _merge_alias_metadata(metadata: object) -> None:
+        if not isinstance(metadata, dict):
+            return
+        for key, value in metadata.items():
+            if key == "format":
+                continue
+            if isinstance(key, str) and isinstance(value, str):
+                alias_map[key] = value
+
+    index_files = sorted(path.glob("*.safetensors.index.json"))
+    if index_files:
+        index_data = json.loads(index_files[0].read_text())
+        _merge_alias_metadata(index_data.get("metadata"))
+        shard_names = list(dict.fromkeys(index_data.get("weight_map", {}).values()))
+        for shard_name in shard_names:
+            shard_path = path / shard_name
+            with safe_open(str(shard_path), framework="pt", device=target_device) as handle:
+                _merge_alias_metadata(handle.metadata())
+                for key in handle.keys():
+                    state_dict[key] = handle.get_tensor(key)
+    else:
+        safetensors_files = sorted(path.glob("*.safetensors"))
+        if not safetensors_files:
+            raise FileNotFoundError(f"No .safetensors files found in {path}")
+        for shard_path in safetensors_files:
+            with safe_open(str(shard_path), framework="pt", device=target_device) as handle:
+                _merge_alias_metadata(handle.metadata())
+                for key in handle.keys():
+                    state_dict[key] = handle.get_tensor(key)
+
+    for alias_key, canonical_key in alias_map.items():
+        if alias_key not in state_dict and canonical_key in state_dict:
+            state_dict[alias_key] = state_dict[canonical_key]
+    return state_dict
+
+
+def _load_model_weights_from_path(
+    model: torch.nn.Module,
+    *,
+    path: str | Path,
+    label: str,
+    preferred_state_dict_paths: Tuple[str, ...] = (),
+    strict: bool = False,
+) -> None:
+    path = Path(path).expanduser().resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"{label} weights not found: {path}")
+
+    if _is_safetensors_shard_dir(path):
+        print(f"[{label}] loading sharded weights from {path}")
+        state_dict = _load_state_dict_from_safetensors_dir(path, device="cpu")
+        result = model.load_state_dict(state_dict, strict=strict)
+        if result is not None:
+            missing, unexpected = result
+            print(f"[{label}] shard load strict={strict}, missing={len(missing)} unexpected={len(unexpected)}")
+        return
+
+    loaded = _safe_torch_load_any(str(path))
+    state_dict = None
+    for dotted_path in preferred_state_dict_paths:
+        candidate = _nested_dict_get(loaded, dotted_path)
+        if isinstance(candidate, dict) and len(candidate) > 0:
+            state_dict = candidate
+            break
+    if state_dict is None and isinstance(loaded, dict):
+        state_dict = loaded
+    if not isinstance(state_dict, dict) or len(state_dict) == 0:
+        raise ValueError(f"[{label}] unable to locate a state_dict in {path}")
+
+    result = model.load_state_dict(state_dict, strict=strict)
+    if result is not None:
+        missing, unexpected = result
+        print(f"[{label}] load_state_dict strict={strict}, missing={len(missing)} unexpected={len(unexpected)}")
+
+
+def _purge_sysmodules(pkg: str) -> None:
+    """Delete pkg and its submodules from sys.modules."""
+    for k in list(sys.modules.keys()):
+        if k == pkg or k.startswith(pkg + "."):
+            try:
+                del sys.modules[k]
+            except Exception:
+                pass
+
+
+def _ensure_infinity_repo_on_syspath() -> Path:
+    """
+    Ensure the selected InfinityStar repo is importable as a python package root.
+    This is required for Stage2 VAE construction (`infinity.models...` imports).
+    """
+    repo_root = _get_infinity_repo_root()
+    if not repo_root.exists():
+        raise FileNotFoundError(f"InfinityStar repo not found: {repo_root}")
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    return repo_root
+
+
+def _build_stage2_infinity_vae_from_ckpt(ckpt: Dict[str, object]) -> torch.nn.Module:
+    """
+    Build the InfinityStar VAE used by Stage2 latent2action.
+    """
+    _ensure_infinity_repo_on_syspath()
+
+    ckpt_args = ckpt.get("args") if isinstance(ckpt.get("args"), dict) else {}
+    vae_path = (
+        str(ckpt.get("infinitystar_vae_path", "")).strip()
+        or str(ckpt_args.get("infinitystar_vae_path", "")).strip()
+        or str((DEFAULT_INFINITY_REPO_ROOT / "checkpoint" / "infinitystar_videovae.pth").resolve())
+    )
+    vae_type = int(ckpt.get("infinitystar_vae_type", ckpt_args.get("infinitystar_vae_type", 64)))
+
+    # Import the VAE builder from InfinityStar repo.
+    # NOTE: some InfinityStar forks have tight coupling with specific torch versions
+    # (e.g. torch._dynamo exception names). If this import fails, we fall back to
+    # the already-loaded streaming VAE when available.
+    try:
+        from types import SimpleNamespace
+
+        from infinity.models.videovae.models.load_vae_bsq_wan_absorb_patchify import (  # type: ignore
+            video_vae_model,
+        )
+    except Exception as e:
+        if _infinity_session_template is not None and getattr(_infinity_session_template, "vae", None) is not None:
+            print(f"[Stage2] WARN: failed to import/build InfinityStar VAE from repo, fallback to streaming VAE: {e}")
+            vae = _infinity_session_template.vae  # type: ignore[assignment]
+            vae.eval()
+            for p in vae.parameters():
+                p.requires_grad_(False)
+            # best-effort: load vae_state_dict if present
+            vae_sd = ckpt.get("vae_state_dict")
+            if isinstance(vae_sd, dict) and len(vae_sd) > 0:
+                try:
+                    missing, unexpected = vae.load_state_dict(vae_sd, strict=False)
+                    if missing or unexpected:
+                        print(f"[Stage2] streaming-vae strict=False, missing={len(missing)} unexpected={len(unexpected)}")
+                except Exception:
+                    pass
+            return vae
+        raise RuntimeError(f"failed to import stage2 InfinityStar VAE builder: {e}")
+
+    global_args = SimpleNamespace(
+        semantic_scale_dim=int(ckpt_args.get("semantic_scale_dim", 16)),
+        detail_scale_dim=int(ckpt_args.get("detail_scale_dim", 64)),
+        use_learnable_dim_proj=int(ckpt_args.get("use_learnable_dim_proj", 0)),
+        detail_scale_min_tokens=int(ckpt_args.get("detail_scale_min_tokens", 350)),
+        use_feat_proj=int(ckpt_args.get("use_feat_proj", 2)),
+        semantic_scales=int(ckpt_args.get("semantic_scales", 11)),
+    )
+
+    device = torch.device("cuda" if _DEVICE == "cuda" else "cpu")
+    vae = video_vae_model(
+        vqgan_ckpt=str(vae_path),
+        schedule_mode="dynamic",
+        codebook_dim=int(vae_type),
+        global_args=global_args,
+        test_mode=True,
+    ).to(device)
+    vae.eval()
+    for p in vae.parameters():
+        p.requires_grad_(False)
+
+    # Optional: load VAE weights from checkpoint if present.
+    vae_sd = ckpt.get("vae_state_dict")
+    if isinstance(vae_sd, dict) and len(vae_sd) > 0:
+        missing, unexpected = vae.load_state_dict(vae_sd, strict=False)
+        if missing or unexpected:
+            print(f"[Stage2] vae strict=False, missing={len(missing)} unexpected={len(unexpected)}")
+    return vae
+
+
+def _ensure_stage2_imports() -> Tuple[object, object]:
+    """
+    Ensure we import Stage-2 TimesFormer + adapter from `STAGE2_REPO_ROOT`.
+
+    CRITICAL: this repo defines top-level packages `timesformer` and `models`,
+    which can be shadowed by other TSformer copies already inserted into sys.path.
+    We force-import the versions that contain `forward_features_from_patch_tokens`.
+    """
+    if not STAGE2_REPO_ROOT.exists():
+        raise FileNotFoundError(f"Stage2 TSformer repo not found: {STAGE2_REPO_ROOT}")
+    if str(STAGE2_REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(STAGE2_REPO_ROOT))
+
+    # If `timesformer`/`models` were already imported from a different repo copy,
+    # purge them so Python resolves them again from STAGE2_REPO_ROOT.
+    tm = sys.modules.get("timesformer")
+    if tm is not None:
+        f = str(getattr(tm, "__file__", "") or "")
+        if f and str(STAGE2_REPO_ROOT) not in f:
+            _purge_sysmodules("timesformer")
+    mm = sys.modules.get("models")
+    if mm is not None:
+        f = str(getattr(mm, "__file__", "") or "")
+        if f and str(STAGE2_REPO_ROOT) not in f:
+            _purge_sysmodules("models")
+
+    # Import required symbols (avoid importing datasets.* to prevent collisions).
+    from timesformer.models.vit import VisionTransformer  # type: ignore
+    from models.vae96_to_tsformer_adapter import Vae96ToTSformerEmbedAdapter  # type: ignore
+
+    if not hasattr(VisionTransformer, "forward_features_from_patch_tokens"):
+        raise RuntimeError(
+            "Imported VisionTransformer does not have forward_features_from_patch_tokens; "
+            "a different TSformer copy is shadowing Stage2 repo. "
+            f"STAGE2_REPO_ROOT={STAGE2_REPO_ROOT}"
+        )
+    return VisionTransformer, Vae96ToTSformerEmbedAdapter
+
+
+def _init_stage2_latent2action_models(*, ckpt_path: str) -> None:
+    global _s2_tsformer, _s2_adapter, _s2_vae, _s2_label_stats, _s2_ckpt_path
+    if _s2_tsformer is not None and _s2_adapter is not None and _s2_ckpt_path == str(ckpt_path):
+        return
+
+    ckpt_path = os.path.abspath(str(ckpt_path))
+    if not os.path.exists(ckpt_path):
+        raise FileNotFoundError(f"Stage2 checkpoint not found: {ckpt_path}")
+
+    VisionTransformer, Vae96ToTSformerEmbedAdapter = _ensure_stage2_imports()
+    import torch.nn as nn
+    from functools import partial
+
+    ckpt = _safe_torch_load_any(ckpt_path)
+    if not isinstance(ckpt, dict):
+        raise ValueError("Stage2 checkpoint must be a dict (combined checkpoint)")
+
+    ts_sd = ckpt.get("model_state_dict") or ckpt.get("tsformer_state_dict")
+    ad_sd = ckpt.get("adapter_state_dict") or ckpt.get("state_dict")
+    if not isinstance(ts_sd, dict) or not isinstance(ad_sd, dict):
+        raise ValueError("Stage2 checkpoint missing model_state_dict/adapter_state_dict (or supported aliases)")
+
+    device = torch.device("cuda" if _DEVICE == "cuda" else "cpu")
+    tsformer = VisionTransformer(
+        img_size=(192, 640),
+        num_classes=18,
+        patch_size=16,
+        embed_dim=384,
+        depth=12,
+        num_heads=6,
+        mlp_ratio=4,
+        qkv_bias=True,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),
+        drop_rate=0.0,
+        attn_drop_rate=0.0,
+        drop_path_rate=0.1,
+        num_frames=int(_S2_WINDOW_SIZE),
+        attention_type="divided_space_time",
+    ).to(device).eval()
+    adapter = Vae96ToTSformerEmbedAdapter().to(device).eval()
+
+    missing, unexpected = tsformer.load_state_dict(ts_sd, strict=False)
+    if missing or unexpected:
+        print(f"[Stage2] tsformer strict=False, missing={len(missing)} unexpected={len(unexpected)}")
+    missing, unexpected = adapter.load_state_dict(ad_sd, strict=False)
+    if missing or unexpected:
+        print(f"[Stage2] adapter strict=False, missing={len(missing)} unexpected={len(unexpected)}")
+
+    # Build/load Stage2 VAE (do NOT reuse InfinityStar streaming VAE; architectures may differ).
+    vae = _build_stage2_infinity_vae_from_ckpt(ckpt)
+
+    # Optional: label stats for denormalizing head outputs -> (rad, meters).
+    label_stats: Optional[Dict[str, torch.Tensor]] = None
+    ls = ckpt.get("label_stats")
+    if isinstance(ls, dict) and all(k in ls for k in ("mean_angles", "std_angles", "mean_t", "std_t")):
+        try:
+            label_stats = {
+                "mean_angles": torch.as_tensor(ls["mean_angles"], dtype=torch.float32, device=device).reshape(3),
+                "std_angles": torch.as_tensor(ls["std_angles"], dtype=torch.float32, device=device).reshape(3),
+                "mean_t": torch.as_tensor(ls["mean_t"], dtype=torch.float32, device=device).reshape(3),
+                "std_t": torch.as_tensor(ls["std_t"], dtype=torch.float32, device=device).reshape(3),
+            }
+            src = ckpt.get("label_stats_source") or "checkpoint"
+            print(f"[Stage2] label_stats loaded from {src}")
+        except Exception as e:
+            print(f"[Stage2] failed to parse label_stats: {e}")
+            label_stats = None
+
+    _s2_tsformer = tsformer
+    _s2_adapter = adapter
+    _s2_vae = vae
+    _s2_label_stats = label_stats
+    _s2_ckpt_path = ckpt_path
+
+
+def _stage2_patchify_to_z64_BCTHW(summed_codes_BCTHW: torch.Tensor) -> torch.Tensor:
+    """
+    Convert InfinityStar summed_codes to patchified z_ext expected by Stage-2 VAE decode:
+      - expect [1,64,T_lat,16,16] (or generally C=64).
+
+    Some InfinityStar variants output unpatchified [1,16,T_lat,H,W]; in that case we pixel-unshuffle (factor=2).
+    """
+    if summed_codes_BCTHW.ndim != 5 or int(summed_codes_BCTHW.shape[0]) != 1:
+        raise ValueError(f"expected summed_codes shape [1,C,T,H,W], got {tuple(summed_codes_BCTHW.shape)}")
+    c = int(summed_codes_BCTHW.shape[1])
+    if c == 64:
+        return summed_codes_BCTHW.contiguous()
+    if c != 16:
+        raise ValueError(f"unsupported summed_codes channels for stage2: C={c} (need 16 or 64)")
+    # [B,C,T,H,W] -> [B,T,C,H,W]
+    x = summed_codes_BCTHW.permute(0, 2, 1, 3, 4).contiguous()
+    b, t, c0, h, w = x.shape
+    if int(h) % 2 != 0 or int(w) % 2 != 0:
+        raise ValueError(f"cannot pixel_unshuffle with odd spatial: H,W={(int(h), int(w))}")
+    x2 = x.view(int(b) * int(t), int(c0), int(h), int(w))
+    x2 = torch.nn.functional.pixel_unshuffle(x2, 2)  # (B*T, C*4, H/2, W/2) => (B*T,64,*,*)
+    x2 = x2.view(int(b), int(t), int(x2.shape[1]), int(x2.shape[2]), int(x2.shape[3]))
+    out = x2.permute(0, 2, 1, 3, 4).contiguous()  # [B,64,T,H/2,W/2]
+    return out
+
+
+def _stage2_decode_tokens_tnd(*, vae: torch.nn.Module, adapter: torch.nn.Module, z64_BCTHW: torch.Tensor) -> torch.Tensor:
+    """
+    Decode z_ext through VAE decoder; hook last up_block feature and map to TSformer patch tokens.
+    Returns tokens_tnd: (T_frames, N_patches, D).
+    Keeps the same decode-to-patch-token flow used by the stage2 latent2action path.
+    """
+    if z64_BCTHW.ndim != 5 or int(z64_BCTHW.shape[0]) != 1 or int(z64_BCTHW.shape[1]) != 64:
+        raise ValueError(f"expected z_ext shape (1,64,T_lat,H,W), got {tuple(z64_BCTHW.shape)}")
+
+    # Ensure device matches VAE
+    try:
+        vae_device = next(iter(vae.parameters())).device
+        vae_dtype = next(iter(vae.parameters())).dtype
+    except Exception:
+        vae_device = torch.device("cuda" if _DEVICE == "cuda" else "cpu")
+        vae_dtype = torch.float32
+
+    z = z64_BCTHW.to(vae_device, dtype=vae_dtype, non_blocking=(vae_device.type == "cuda"))
+
+    tokens_slices: List[torch.Tensor] = []
+
+    def hook(_module, _inp, out):
+        hs = out[0] if isinstance(out, (tuple, list)) else out  # (B,96,t_slice,H,W)
+        if not isinstance(hs, torch.Tensor) or hs.ndim != 5:
+            raise RuntimeError("VAE decoder hook output is not a 5D Tensor")
+        bh = int(hs.shape[0])
+        if bh != 1:
+            raise RuntimeError(f"unexpected VAE batch in hook: hs={tuple(hs.shape)}")
+        t_slice = int(hs.shape[2])
+        tok, _t2, _w2 = adapter(hs)  # (B*t_slice, N, D)
+        tok = tok.view(bh, t_slice, int(tok.shape[1]), int(tok.shape[2])).contiguous()  # (1,t_slice,N,D)
+        tokens_slices.append(tok[0])  # (t_slice,N,D)
+
+    # Register hook on the last up_block of decoder.
+    try:
+        handle = vae.decoder.up_blocks[-1].register_forward_hook(hook)  # type: ignore[attr-defined]
+    except Exception as e:
+        raise RuntimeError(f"VAE decoder hook registration failed: {e}")
+
+    try:
+        with torch.no_grad():
+            if vae_device.type == "cuda":
+                use_amp = vae_dtype in (torch.float16, torch.bfloat16)
+                with torch.cuda.amp.autocast(enabled=bool(use_amp), dtype=(vae_dtype if use_amp else torch.float16)):
+                    try:
+                        _ = vae.decode(z, return_dict=False)[0]  # type: ignore[call-arg]
+                    except Exception:
+                        _ = vae.decode(z)  # type: ignore[misc]
+            else:
+                try:
+                    _ = vae.decode(z, return_dict=False)[0]  # type: ignore[call-arg]
+                except Exception:
+                    _ = vae.decode(z)  # type: ignore[misc]
+    finally:
+        try:
+            handle.remove()
+        except Exception:
+            pass
+
+    if len(tokens_slices) == 0:
+        raise RuntimeError("no tokens captured from VAE decoder hook")
+    tokens_tnd = torch.cat(tokens_slices, dim=0).contiguous()  # (T,N,D)
+    return tokens_tnd
+
+
+def _gather_window_tokens(tokens_tnd: torch.Tensor, starts: torch.Tensor, window_size: int) -> torch.Tensor:
+    """
+    tokens_tnd: (T,N,D)
+    starts: (K,)
+    returns patch_tokens: (K*window_size, N, D)
+    """
+    if tokens_tnd.ndim != 3:
+        raise ValueError(f"tokens_tnd must be (T,N,D), got {tuple(tokens_tnd.shape)}")
+    t, n, d = tokens_tnd.shape
+    k = int(starts.shape[0])
+    flat = tokens_tnd.view(int(t), int(n) * int(d))
+    t_idx = torch.arange(int(window_size), device=starts.device, dtype=torch.long).view(1, int(window_size))
+    idx = starts.view(k, 1) + t_idx  # (K,window_size)
+    idx2 = idx.view(k * int(window_size), 1).expand(k * int(window_size), int(n) * int(d))
+    g = flat.gather(0, idx2).view(k * int(window_size), int(n), int(d))
+    return g.contiguous()
+
+
+def _stage2_deltas_to_actions_cm_deg(deltas_T6: torch.Tensor) -> List[List[float]]:
+    """
+    deltas_T6 layout: [dz,dy,dx, tx,ty,tz] in (rad, meters), where row0 is usually zeros.
+    Returns API layout per step (excluding t=0):
+      [dx_cm,dy_cm,dz_cm, droll_deg, dyaw_deg, dpitch_deg]
+    """
+    if deltas_T6.ndim != 2 or int(deltas_T6.shape[1]) != 6:
+        raise ValueError(f"deltas must be (T,6), got {tuple(deltas_T6.shape)}")
+    out: List[List[float]] = []
+    t = int(deltas_T6.shape[0])
+    for i in range(1, t):
+        dz, dy, dx = [float(x) for x in deltas_T6[i, 0:3]]
+        tx, ty, tz = [float(x) for x in deltas_T6[i, 3:6]]
+        out.append(
+            [
+                tx * 100.0,
+                ty * 100.0,
+                tz * 100.0,
+                dx * (180.0 / math.pi),
+                dz * (180.0 / math.pi),
+                dy * (180.0 / math.pi),
+            ]
+        )
+    return out
+
+
+def _stage2_predict_16_actions_for_segment_cm_deg(
+    *,
+    st: "TrajectoryState",
+    infer_res: "SegmentInferResult",
+    stride: int = 1,
+) -> List[List[float]]:
+    """
+    Stage-2 latent2action path:
+    - Build full tokens_tnd for the whole predicted horizon from summed_codes (z_ext).
+    - For the current segment, take only left-context frames [ctx_start .. clip_end] (NO right-context),
+      run window=4 sliding inference with overlap averaging, and slice the 16 actions for this segment.
+
+    This matches the "only pad left 3 frames" rule used by actionhead_ref_vit.
+    """
+    if _s2_tsformer is None or _s2_adapter is None or _s2_vae is None:
+        raise RuntimeError("Stage2 models not initialized")
+
+    # Enforce full-horizon inference to keep absolute frame indices stable.
+    if int(infer_res.infer_num_frames) != int(infer_res.total_num_frames):
+        raise ValueError(
+            "stage2 tsformer_latent requires infer_num_frames == total_num_frames. "
+            "Disable rolling_tail_infer/tail_window for this mode."
+        )
+
+    obs_len = int(infer_res.obs_len)
+    next_obs_len = int(infer_res.next_obs_len)
+    if int(next_obs_len - obs_len) != 16:
+        raise ValueError(f"stage2 tsformer_latent expects 16-frame segments, got obs_len={obs_len} next_obs_len={next_obs_len}")
+    clip_abs_start = int(obs_len) + 1
+    clip_abs_end = int(next_obs_len)
+    ctx_start_abs = max(1, int(clip_abs_start) - 3)  # == max(1, obs_len-2)
+
+    # Convert summed_codes to patchified z_ext and decode tokens.
+    summed = infer_res.summed_codes
+    z64 = _stage2_patchify_to_z64_BCTHW(summed).detach()
+    tokens_tnd = _stage2_decode_tokens_tnd(vae=_s2_vae, adapter=_s2_adapter, z64_BCTHW=z64)  # (T,N,D)
+
+    t_full = int(tokens_tnd.shape[0])
+    if int(clip_abs_end) > int(t_full):
+        raise ValueError(f"tokens too short: T={t_full} but need clip_abs_end={clip_abs_end}")
+
+    # Slice subrange [ctx_start .. clip_end] inclusive (1-indexed abs frame -> 0-index)
+    s0 = int(ctx_start_abs) - 1
+    e0 = int(clip_abs_end)  # python slice end (exclusive) => abs_end-1 + 1
+    tokens_sub = tokens_tnd[s0:e0].contiguous()
+    t_sub = int(tokens_sub.shape[0])
+    if t_sub < int(_S2_WINDOW_SIZE):
+        return []
+
+    device = next(iter(_s2_tsformer.parameters())).device  # type: ignore[union-attr]
+    tokens_sub = tokens_sub.to(device, dtype=torch.float32, non_blocking=(device.type == "cuda"))
+
+    # Sliding windows over tokens_sub
+    starts = torch.arange(0, int(t_sub) - int(_S2_WINDOW_SIZE) + 1, max(1, int(stride)), device=device, dtype=torch.long)
+    if int(starts.numel()) <= 0:
+        return []
+    patch_tokens = _gather_window_tokens(tokens_sub, starts=starts, window_size=int(_S2_WINDOW_SIZE))  # (K*W, N, D)
+    k = int(starts.shape[0])
+
+    with torch.no_grad():
+        if device.type == "cuda":
+            try:
+                m_dtype = next(iter(_s2_tsformer.parameters())).dtype  # type: ignore[union-attr]
+            except Exception:
+                m_dtype = torch.float16
+            use_amp = m_dtype in (torch.float16, torch.bfloat16)
+            with torch.cuda.amp.autocast(enabled=bool(use_amp), dtype=(m_dtype if use_amp else torch.float16)):
+                feat = _s2_tsformer.forward_features_from_patch_tokens(patch_tokens, B=k, T=int(_S2_WINDOW_SIZE), W=int(_S2_W_GRID))  # type: ignore[union-attr]
+                pred = _s2_tsformer.head(feat)  # type: ignore[union-attr]
+        else:
+            feat = _s2_tsformer.forward_features_from_patch_tokens(patch_tokens, B=k, T=int(_S2_WINDOW_SIZE), W=int(_S2_W_GRID))  # type: ignore[union-attr]
+            pred = _s2_tsformer.head(feat)  # type: ignore[union-attr]
+
+    pred_f = pred.detach().float()  # (K,18)
+    window_deltas = pred_f.view(k, 3, 6)  # (K,3,6) normalized or (rad,m)
+    if isinstance(_s2_label_stats, dict):
+        ma = _s2_label_stats["mean_angles"].view(1, 1, 3)
+        sa = _s2_label_stats["std_angles"].view(1, 1, 3)
+        mt = _s2_label_stats["mean_t"].view(1, 1, 3)
+        stt = _s2_label_stats["std_t"].view(1, 1, 3)
+        # Stage2 layout per delta: [dz,dy,dx, tx,ty,tz] where first 3 are angles, last 3 translations.
+        window_deltas[:, :, 0:3] = window_deltas[:, :, 0:3] * sa + ma
+        window_deltas[:, :, 3:6] = window_deltas[:, :, 3:6] * stt + mt
+
+    # Aggregate to per-frame deltas (t_sub,6), delta[0]=0
+    acc = torch.zeros((t_sub, 6), device=device, dtype=torch.float32)
+    cnt = torch.zeros((t_sub,), device=device, dtype=torch.int32)
+
+    offs = torch.arange(1, int(_S2_WINDOW_SIZE), device=device, dtype=torch.long).view(1, -1)  # (1,3)
+    t_idx = starts.view(-1, 1) + offs  # (K,3)
+    mask = (t_idx >= 0) & (t_idx < int(t_sub))
+    if bool(mask.any()):
+        t_flat = t_idx[mask].view(-1)
+        v_flat = window_deltas[mask].view(-1, 6)
+        acc.scatter_add_(0, t_flat.view(-1, 1).expand(-1, 6), v_flat)
+        cnt.scatter_add_(0, t_flat, torch.ones_like(t_flat, dtype=torch.int32))
+
+    deltas = torch.zeros((t_sub, 6), device=device, dtype=torch.float32)
+    m = cnt > 0
+    if bool(m.any()):
+        deltas[m] = acc[m] / cnt[m].to(torch.float32).view(-1, 1)
+
+    actions_all = _stage2_deltas_to_actions_cm_deg(deltas.detach().cpu())  # len=t_sub-1
+
+    # Slice exactly the 16 actions for this clip.
+    start_idx = int(obs_len) - int(ctx_start_abs)
+    end_idx = int(start_idx) + (int(clip_abs_end) - int(obs_len))
+    out = actions_all[int(start_idx) : int(end_idx)]
+    need = int(clip_abs_end) - int(obs_len)
+    if len(out) != need:
+        raise ValueError(f"stage2 actions length mismatch: got={len(out)} need={need} (ctx={ctx_start_abs} obs={obs_len} end={clip_abs_end})")
+    return out
+
+
 def _load_tsformer_p2p(
     *,
     ckpt_path: str,
     stats_path: str,
     device: str,
 ) -> Tuple[torch.nn.Module, Optional[torch.Tensor], Optional[torch.Tensor]]:
+    try:
+        from pretrain_latent_p2p import build_p2p_model  # type: ignore
+    except Exception as e:
+        raise RuntimeError(f"legacy TSformer(P2P) import failed (install its deps like fvcore): {e}")
     args = argparse.Namespace(window_size=2, hidden_dim=96, num_layers=2, device=device, checkpoint=ckpt_path, stats_path=stats_path)
     model = build_p2p_model(args)
     model.to(device).eval()
@@ -585,10 +1146,11 @@ def _init_models(
     *,
     cfg: ServerConfig,
 ) -> None:
-    global _infinity_args, _infinity_session_template, _infinity_self_correction, _ts_model, _ts_mean, _ts_std
+    global _infinity_args, _infinity_session_template, _infinity_self_correction
 
-    skip_p2p = _use_actionhead_ref_mode_by_default()
-    if _infinity_session_template is not None and (_ts_model is not None or skip_p2p):
+    # Only initialize InfinityStar weights/session template here.
+    # Action heads (stage2 latent2action / actionhead_ref_vit) are initialized lazily per mode.
+    if _infinity_session_template is not None:
         return
 
     print("[Service] initializing models...")
@@ -602,7 +1164,7 @@ def _init_models(
             return p
         if os.path.isabs(p):
             return p
-        return str((ROOT / p).resolve())
+        return str((REPO / p).resolve())
 
     cfg.infinity.ckpt = _resolve_path(cfg.infinity.ckpt)
     cfg.tsformer.ckpt = _resolve_path(cfg.tsformer.ckpt)
@@ -625,24 +1187,6 @@ def _init_models(
         tau_video=float(cfg.infinity.tau_video),
     )
 
-    # Align with StageB training defaults (critical for flex-attn packing correctness).
-    # Infinity forward pads (visual+text) sequence to `pad_to_multiplier` when train_with_var_seq_len=1.
-    # Our trace_ce old_logprob path relies on the same padding regime to match flex-attn mask construction.
-    try:
-        a.train_with_var_seq_len = 1
-        a.pad_to_multiplier = int(getattr(a, "pad_to_multiplier", 128) or 128) if hasattr(a, "pad_to_multiplier") else 128
-    except Exception:
-        pass
-    try:
-        a.train_max_token_len = int(getattr(a, "train_max_token_len", 20480) or 20480)
-        a.allow_less_one_elem_in_seq = int(getattr(a, "allow_less_one_elem_in_seq", 1) or 1)
-    except Exception:
-        pass
-    try:
-        a.use_flex_attn = True
-    except Exception:
-        pass
-
     # CRITICAL: `infinity_elegant` schedules rely on `args.frames_inner_clip` to compute
     # scale_pack_info.frame_ss/frame_ee. If it doesn't match the schedule family
     # (e.g. clip4frames vs clip20frames), `freqs_frames[:, frame_ss:frame_ee]` can be empty,
@@ -658,6 +1202,15 @@ def _init_models(
 
     text_tokenizer, text_encoder = load_tokenizer(t5_path=a.text_encoder_ckpt)  # type: ignore[misc]
     vae = load_visual_tokenizer(a).float().to(_DEVICE)  # type: ignore[misc]
+    vae_model_path = str(getattr(a, "vae_model_path", "") or "").strip()
+    if vae_model_path:
+        _load_model_weights_from_path(
+            vae,
+            path=vae_model_path,
+            label="InfinityVAE",
+            preferred_state_dict_paths=("trainer.vae_local", "vae_state_dict", "vae"),
+            strict=False,
+        )
     infinity = load_transformer(vae, a).to(_DEVICE)  # type: ignore[misc]
     infinity.eval().requires_grad_(False)
     self_correction = SelfCorrection(vae, a)  # type: ignore[misc]
@@ -674,20 +1227,6 @@ def _init_models(
     _infinity_args = a
     _infinity_session_template = session
     _infinity_self_correction = self_correction
-
-    # TSformer(P2P): load once unless default mode is actionhead_ref_vit.
-    # In actionhead_ref_vit mode we predict actions from decoded video windows,
-    # so p2p weights are not required and can be incompatible.
-    if skip_p2p:
-        _ts_model, _ts_mean, _ts_std = None, None, None
-        print("[Service] ACTION_HEAD_MODE=actionhead_ref_vit*, skip loading TSformer(P2P).")
-    else:
-        ts_model, mean_t, std_t = _load_tsformer_p2p(
-            ckpt_path=os.path.abspath(cfg.tsformer.ckpt),
-            stats_path=os.path.abspath(cfg.tsformer.stats) if cfg.tsformer.stats else "",
-            device=_DEVICE,
-        )
-        _ts_model, _ts_mean, _ts_std = ts_model, mean_t, std_t
 
     print("[Service] model initialization done.")
 
@@ -728,8 +1267,6 @@ class TrajectoryState:
 
     # emission bookkeeping
     last_emitted_segment: int = -1
-    # request mode hint (prefix_mode: full prefix [1..K] per call)
-    last_req_prefix_mode: bool = False
 
     def num_frames(self) -> int:
         return len(self.frames_cpu)
@@ -894,7 +1431,7 @@ def _infer_summed_codes_for_step(
     top_p: float,
     injection: str,
     need_pred_video: bool = False,
-) -> Tuple[torch.Tensor, Optional[torch.Tensor], float, Optional[str]]:
+) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
     """
     Run InfinityStar inference for one closed-loop step and return summed_codes [1,16,pt,H,W].
     This mirrors the control flow in batch_closed_loop_streaming_infer_routes.py, but skips VAE decode.
@@ -952,11 +1489,9 @@ def _infer_summed_codes_for_step(
         len(sched.scale_schedule) - int(sched.tower_split_index)
     )
 
-    # Use the legacy standalone inference wrapper style via gen_one_example(),
+    # Match `tools/infer_v2v_segments_49f_clip16.py`: use gen_one_example() style wrapper,
     # which internally normalizes cfg/tau lists and handles prompt encoding per-call.
     try:
-        trace_sample_logprob = 0.0
-        trace_path: Optional[str] = None
         if infinity_gen_one_example is None:
             raise RuntimeError("InfinityStar gen_one_example not imported")
         assert _infinity_args is not None
@@ -971,7 +1506,7 @@ def _infer_summed_codes_for_step(
         with torch.no_grad():
             if _DEVICE == "cuda":
                 with torch.cuda.amp.autocast(enabled=True, dtype=next(iter(st.stream.infinity.parameters())).dtype):
-                    out_gen = infinity_gen_one_example(  # type: ignore[misc]
+                    summed_codes = infinity_gen_one_example(  # type: ignore[misc]
                         st.stream.infinity,
                         st.stream.vae,
                         st.stream.text_tokenizer,
@@ -996,10 +1531,9 @@ def _infer_summed_codes_for_step(
                         context_info=sched.context_info,
                         noise_list=None,
                         return_summed_code_only=True,
-                        return_trace=True,
                     )
             else:
-                out_gen = infinity_gen_one_example(  # type: ignore[misc]
+                summed_codes = infinity_gen_one_example(  # type: ignore[misc]
                     st.stream.infinity,
                     st.stream.vae,
                     st.stream.text_tokenizer,
@@ -1024,399 +1558,7 @@ def _infer_summed_codes_for_step(
                     context_info=sched.context_info,
                     noise_list=None,
                     return_summed_code_only=True,
-                    return_trace=True,
                 )
-
-        summed_codes = out_gen
-        if isinstance(out_gen, dict):
-            summed_codes = out_gen.get("summed_codes", None)
-            try:
-                slp = out_gen.get("sample_logprob", 0.0)
-                if isinstance(slp, torch.Tensor):
-                    trace_sample_logprob = float(slp.detach().to("cpu").item())
-                else:
-                    trace_sample_logprob = float(slp)
-            except Exception:
-                trace_sample_logprob = 0.0
-            # Prefer clip-aligned logprob for this segment when available.
-            try:
-                clipid_target = int(step_i) + 1
-                byc = out_gen.get("sample_logprob_by_clip", None)
-                if isinstance(byc, list) and len(byc) > clipid_target:
-                    v = byc[clipid_target]
-                    if isinstance(v, torch.Tensor):
-                        trace_sample_logprob = float(v.detach().to("cpu").item())
-                    else:
-                        trace_sample_logprob = float(v)
-            except Exception:
-                pass
-
-            # Keep a copy of sampling-time logprob (often guided by cfg/tau and full schedule).
-            trace_sample_logprob_sampling = float(trace_sample_logprob)
-            trace_sample_logprob_trace_ce = None
-
-            # Optional: compute old_logprob via teacher-forcing single forward (StageB trace_ce compatible).
-            # Enable by env:
-            #   INFINITY_STAGEA_OLD_LOGPROB_MODE=trace_ce
-            mode = (os.environ.get("INFINITY_STAGEA_OLD_LOGPROB_MODE", "") or "").strip().lower()
-            if mode == "trace_ce":
-                    strict = (os.environ.get("INFINITY_STAGEA_OLD_LOGPROB_STRICT", "0") or "0").strip()
-                    strict = int(strict) == 1
-                    import math as _math
-                    import json as _json
-                    import numpy as _np
-                    import torch.nn.functional as _F
-                    from infinity.schedules.dynamic_resolution import (  # type: ignore
-                        get_first_full_spatial_size_scale_index as _ffssi,
-                    )
-                    from infinity.schedules.infinity_elegant import (  # type: ignore
-                        get_visual_rope_embeds as _get_rope,
-                        interpolate as _interp,
-                    )
-
-                    idx_trace = out_gen.get("idx_trace", None)
-                    if not isinstance(idx_trace, list) or len(idx_trace) <= 0:
-                        raise RuntimeError("trace_ce requires idx_trace list in out_gen")
-
-                    assert st.stream is not None
-                    gpt = st.stream.infinity
-                    vae = st.stream.vae
-                    device0 = next(iter(gpt.parameters())).device
-                    model_dtype = next(iter(gpt.parameters())).dtype if _DEVICE == "cuda" else torch.float32
-
-                    # Disable cond-drop randomness during policy scoring.
-                    orig_cdr = float(getattr(gpt, "cond_drop_rate", 0.0) or 0.0)
-                    try:
-                        gpt.cond_drop_rate = 0.0
-                    except Exception:
-                        pass
-                    try:
-                        text_pair = getattr(st.stream, "_text_cond_tuple", None)
-                        if not (isinstance(text_pair, tuple) and len(text_pair) >= 1):
-                            raise RuntimeError("trace_ce requires stream.reset() (missing _text_cond_tuple)")
-                        text_cond_tuple = text_pair[0]
-
-                        scale_schedule = sched.scale_schedule
-                        first_full = int(_ffssi(scale_schedule))
-                        scales_in_one_clip = int(first_full) + 1
-                        clipid_target = int(step_i) + 1
-
-                        # Repetition used by rollout args (must match StageB scoring).
-                        img_rep_s = str(getattr(_infinity_args, "image_scale_repetition", "[1]")).strip()
-                        vid_rep_s = str(getattr(_infinity_args, "video_scale_repetition", "[1]")).strip()
-                        image_rep = _np.array(_json.loads(img_rep_s), dtype=_np.int64)
-                        video_rep = _np.array(_json.loads(vid_rep_s), dtype=_np.int64)
-
-                        cache_step_id: Dict[int, int] = {}
-                        step_ptr0 = 0
-                        for _si in range(len(scale_schedule)):
-                            if _si < scales_in_one_clip:
-                                _rt = int(image_rep[_si % scales_in_one_clip])
-                            else:
-                                _rt = int(video_rep[_si % scales_in_one_clip])
-                            _rt = max(1, _rt)
-                            cache_step_id[int(_si)] = int(step_ptr0 + _rt - 1)
-                            step_ptr0 += _rt
-                        if len(idx_trace) < int(step_ptr0):
-                            raise RuntimeError(f"trace_ce expects idx_trace len >= {step_ptr0}, got {len(idx_trace)}")
-
-                        # Deterministic scale selection (same as StageB trace_ce).
-                        tmax = int(float(os.environ.get("INFINITY_GRPO_TRACE_CE_TMAX", "20480")))
-                        total_tokens = int(_np.array(scale_schedule).prod(-1).sum())
-                        select_si_list = list(range(len(scale_schedule)))
-                        if total_tokens > tmax:
-                            S = int(scales_in_one_clip)
-                            L = int(len(scale_schedule))
-                            c = int(clipid_target)
-                            if L == S * 4:
-                                if c <= 1:
-                                    select_si_list = list(range(min(L, S + 11)))
-                                elif c == 2:
-                                    select_si_list = [S - 1, 2 * S - 1] + list(range(2 * S, min(L, 2 * S + 11)))
-                                else:
-                                    select_si_list = [S - 1, 2 * S - 1, 3 * S - 1] + list(range(3 * S, min(L, 3 * S + 11)))
-                            elif L == S * 3:
-                                if c <= 1:
-                                    select_si_list = list(range(min(L, S + 11)))
-                                else:
-                                    select_si_list = [S - 1, 2 * S - 1] + list(range(2 * S, min(L, 2 * S + 11)))
-                            else:
-                                select_si_list = list(range(min(L, S)))
-                                tgt = min(L - 1, c * S + (S - 1))
-                                if tgt not in select_si_list:
-                                    select_si_list.append(tgt)
-                            select_si_list = sorted({int(x) for x in select_si_list if 0 <= int(x) < L})
-                        # Keep for exact StageB replay / debugging.
-                        trace_ce_select_si_list = [int(x) for x in select_si_list]
-
-                        # Remap context refs to selected subset.
-                        scale_pack_info = sched.context_info
-                        real_si_2_new_si: Dict[int, int] = {int(r): int(i2) for i2, r in enumerate(select_si_list)}
-                        new_scale_pack_info: Dict[int, Dict[str, Any]] = {}
-                        for new_q, real_q in enumerate(select_si_list):
-                            new_scale_pack_info[int(new_q)] = {"ref_sids": []}
-                            try:
-                                refs = scale_pack_info[int(real_q)].get("ref_sids", [])
-                            except Exception:
-                                refs = []
-                            for rr in refs:
-                                nn = real_si_2_new_si.get(int(rr), None)
-                                if nn is not None:
-                                    new_scale_pack_info[int(new_q)]["ref_sids"].append(int(nn))
-
-                        apply_patchify = bool(getattr(gpt, "apply_spatial_patchify", False))
-                        if apply_patchify:
-                            vae_scale_schedule = [(int(pt), int(2 * ph), int(2 * pw)) for (pt, ph, pw) in scale_schedule]
-                        else:
-                            vae_scale_schedule = [(int(pt), int(ph), int(pw)) for (pt, ph, pw) in scale_schedule]
-
-                        def _latent_to_raw_tokens(lat: torch.Tensor) -> torch.Tensor:
-                            if apply_patchify:
-                                _x = lat.permute(0, 2, 1, 3, 4)
-                                _x = torch.nn.functional.pixel_unshuffle(_x, 2)
-                                _x = _x.permute(0, 2, 1, 3, 4)
-                            else:
-                                _x = lat
-                            return _x.reshape(_x.shape[0], _x.shape[1], -1).permute(0, 2, 1).contiguous()
-
-                        vae_embed_dim = int(getattr(gpt, "vae_embed_dim", 0) or getattr(vae, "embed_dim", 0) or 64)
-                        if getattr(_infinity_args, "noise_input", 0):
-                            summed_code = torch.randn((1, vae_embed_dim, *vae_scale_schedule[0]), device=device0, dtype=model_dtype)
-                        else:
-                            summed_code = torch.zeros((1, vae_embed_dim, *vae_scale_schedule[0]), device=device0, dtype=model_dtype)
-
-                        x_scales: List[torch.Tensor] = []
-                        gt_scales: List[torch.Tensor] = []
-                        rope_scales: List[torch.Tensor] = []
-                        dlabels: List[int] = []
-                        muls: List[int] = []
-                        clipids: List[int] = []
-
-                        for si, pn in enumerate(scale_schedule):
-                            pt, ph, pw = int(pn[0]), int(pn[1]), int(pn[2])
-                            this_lat = summed_code
-                            if tuple(this_lat.shape[-3:]) != tuple(vae_scale_schedule[int(si)]):
-                                this_lat = _F.interpolate(this_lat, size=vae_scale_schedule[int(si)], mode=vae.quantizer.z_interplote_down).contiguous()
-
-                            if int(si) in real_si_2_new_si:
-                                x_scales.append(_latent_to_raw_tokens(this_lat))
-                                rope_scales.append(
-                                    _get_rope(
-                                        gpt.rope2d_freqs_grid,
-                                        scale_schedule,
-                                        int(si),
-                                        int(cache_step_id[int(si)]),
-                                        device=device0,
-                                        args=_infinity_args,
-                                        scale_pack_info=scale_pack_info,
-                                        first_full_spatial_size_scale_index=int(first_full),
-                                    )
-                                )
-                                mul = int(pt * ph * pw)
-                                muls.append(mul)
-                                d_label = int(
-                                    getattr(gpt.other_args, "detail_scale_dim", 64)
-                                    if (ph * pw) >= int(getattr(vae.quantizer, "detail_scale_min_tokens", 350))
-                                    else getattr(gpt.other_args, "semantic_scale_dim", 16)
-                                )
-                                dlabels.append(d_label)
-                                clipids.append(int(si // max(1, scales_in_one_clip)))
-                                forced = idx_trace[int(cache_step_id[int(si)])]
-                                if not isinstance(forced, torch.Tensor):
-                                    forced = torch.tensor(forced, dtype=torch.long, device=device0)
-                                else:
-                                    forced = forced.to(device=device0, dtype=torch.long)
-                                if forced.ndim == 1:
-                                    forced = forced.unsqueeze(0)
-                                gt_scales.append(forced.reshape(1, mul, d_label).contiguous())
-
-                            # Update latent state using cached token (approx; must match StageB trace_ce).
-                            target_pn = vae_scale_schedule[int(first_full)] if int(si) < scales_in_one_clip else vae_scale_schedule[-1]
-                            forced_upd = idx_trace[int(cache_step_id[int(si)])]
-                            if not isinstance(forced_upd, torch.Tensor):
-                                forced_upd = torch.tensor(forced_upd, dtype=torch.long, device=device0)
-                            else:
-                                forced_upd = forced_upd.to(device=device0, dtype=torch.long)
-                            if forced_upd.ndim == 1:
-                                forced_upd = forced_upd.unsqueeze(0)
-                            mul = int(pt * ph * pw)
-                            d_label = int(
-                                getattr(gpt.other_args, "detail_scale_dim", 64)
-                                if (ph * pw) >= int(getattr(vae.quantizer, "detail_scale_min_tokens", 350))
-                                else getattr(gpt.other_args, "semantic_scale_dim", 16)
-                            )
-                            idx_Bld = forced_upd.reshape(1, -1)
-                            idx_Bthwd = idx_Bld.reshape(1, pt, ph, pw, d_label)
-                            if apply_patchify:
-                                _t = idx_Bthwd.permute(0, 1, 4, 2, 3)
-                                _t = torch.nn.functional.pixel_shuffle(_t, 2)
-                                idx_Bthwd = _t.permute(0, 1, 3, 4, 2)
-                            if gt_leak > 0 and isinstance(gt_ls_Bl, list) and int(si) < int(gt_leak):
-                                try:
-                                    idx_Bthwd = gt_ls_Bl[int(cache_step_id[int(si)])].to(device=device0, dtype=idx_Bthwd.dtype)
-                                except Exception:
-                                    pass
-                            if getattr(gpt.other_args, "use_two_stage_lfq", 0):
-                                if (ph * pw) >= int(getattr(vae.quantizer, "detail_scale_min_tokens", 350)):
-                                    is_sem = False
-                                    lfq = vae.quantizer.lfq_detail
-                                else:
-                                    is_sem = True
-                                    lfq = vae.quantizer.lfq_semantic
-                                codes = lfq.indices_to_codes(idx_Bthwd, "bit_label")
-                                codes = _interp(
-                                    codes,
-                                    size=(vae_embed_dim, *target_pn),
-                                    mode=vae.quantizer.z_interplote_up,
-                                    quantizer=vae.quantizer,
-                                    is_semantic_scale=is_sem,
-                                ).contiguous()
-                            else:
-                                codes = vae.quantizer.lfq_detail.indices_to_codes(idx_Bthwd, "bit_label")
-                                codes = _F.interpolate(codes, size=target_pn, mode=vae.quantizer.z_interplote_up)
-                            summed_code = _F.interpolate(summed_code, size=target_pn, mode=vae.quantizer.z_interplote_up).contiguous()
-                            summed_code = summed_code + codes
-                            if int(si) < len(scale_schedule) - 1 and tuple(scale_schedule[int(si)][-2:]) == tuple(scale_schedule[-1][-2:]):
-                                if getattr(_infinity_args, "noise_input", 0):
-                                    summed_code = torch.randn((1, summed_code.shape[1], *vae_scale_schedule[int(si) + 1]), device=device0, dtype=summed_code.dtype)
-                                else:
-                                    summed_code = torch.zeros((1, summed_code.shape[1], *vae_scale_schedule[int(si) + 1]), device=device0, dtype=summed_code.dtype)
-
-                        if not x_scales:
-                            raise RuntimeError("trace_ce selected empty scales")
-                        x_vis = torch.cat(x_scales, dim=1)
-                        rope_vis = torch.cat(rope_scales, dim=4)
-
-                        # Build querysid_refsid.
-                        # IMPORTANT: `lens` may be padded/max length depending on how `_text_cond_tuple` is cached.
-                        # For strict packing-length checks inside `gpt(...)`, we must use the *actual* per-sample
-                        # text token length, which is reliably derived from `cu_seqlens_k` / `kv_compact`.
-                        kv_compact, lens, cu_seqlens_k, max_seqlen_k = text_cond_tuple
-                        try:
-                            # B=1 in StageA server (cfg forced to 1.0 in our scripts), so take [0:1].
-                            if hasattr(cu_seqlens_k, "__len__") and len(cu_seqlens_k) >= 2:
-                                text_len0 = int(cu_seqlens_k[1].item() if hasattr(cu_seqlens_k[1], "item") else cu_seqlens_k[1]) - int(
-                                    cu_seqlens_k[0].item() if hasattr(cu_seqlens_k[0], "item") else cu_seqlens_k[0]
-                                )
-                            else:
-                                text_len0 = int(kv_compact.shape[0])
-                        except Exception:
-                            # Conservative fallback: use kv_compact length.
-                            text_len0 = int(getattr(kv_compact, "shape", [0])[0] or 0)
-                        text_len0 = int(max(0, text_len0))
-                        # Build super_scale_lengths to match Infinity forward padding:
-                        # Infinity.forward concatenates (visual + text) and then pads to pad_to_multiplier when
-                        # train_with_var_seq_len=1. build_flex_attn_func asserts:
-                        #   sum(super_scale_lengths) == padded_seq_len
-                        scale_lengths = [int(m) for m in muls] + [int(text_len0)]
-                        valid_scales = int(len(muls) + 1)
-                        try:
-                            pad_to = int(getattr(_infinity_args, "pad_to_multiplier", 128) or 128)
-                            pad_to = max(1, pad_to)
-                            cur_seq_len = int(_np.sum(scale_lengths))
-                            pad_seq_len = int(_math.ceil(cur_seq_len / float(pad_to)) * pad_to - cur_seq_len)
-                            pad_seq_len = int(max(0, pad_seq_len))
-                            if pad_seq_len > 0:
-                                scale_lengths = scale_lengths + [int(pad_seq_len)]
-                        except Exception:
-                            pass
-                        max_sid_nums = 2000
-                        qref = torch.zeros((max_sid_nums, max_sid_nums), device=device0, dtype=torch.bool)
-                        for i_sid in range(valid_scales):
-                            qref[i_sid][i_sid] = True
-                        for local_q in range(len(muls)):
-                            global_text_sid = len(muls)
-                            qref[local_q][global_text_sid] = True
-                            for local_r in new_scale_pack_info[int(local_q)]["ref_sids"]:
-                                qref[local_q][int(local_r)] = True
-
-                        with torch.cuda.amp.autocast(enabled=(_DEVICE == "cuda"), dtype=model_dtype):
-                            loss_tok, _, _ = gpt(
-                                text_cond_tuple,
-                                x_vis,
-                                gt_BL=gt_scales,
-                                is_image_batch=0,
-                                visual_rope_cache=rope_vis,
-                                sequece_packing_scales=[[tuple(map(int, scale_schedule[si])) for si in select_si_list]],
-                                super_scale_lengths=scale_lengths,
-                                super_querysid_super_refsid=qref,
-                                other_info_by_scale=None,
-                            )
-
-                        nll_target = torch.zeros((1,), dtype=loss_tok.dtype, device=loss_tok.device)
-                        tok_ptr = 0
-                        for j, mul in enumerate(muls):
-                            seg = loss_tok[tok_ptr : tok_ptr + int(mul)]
-                            tok_ptr += int(mul)
-                            if int(clipids[j]) != int(clipid_target):
-                                continue
-                            nll_target = nll_target + seg.sum() * float(dlabels[j])
-                        trace_sample_logprob_trace_ce = float((-nll_target)[0].detach().to("cpu").item())
-                    except Exception as e:
-                        # Fall back to sampling-time logprob if trace_ce fails.
-                        print(f"[trace_ce] old_logprob compute failed, fallback to sampling logprob: {e}")
-                        if strict:
-                            raise
-                        trace_sample_logprob_trace_ce = None
-                    finally:
-                        try:
-                            st.stream.infinity.cond_drop_rate = orig_cdr  # type: ignore[attr-defined]
-                        except Exception:
-                            pass
-            if trace_sample_logprob_trace_ce is not None:
-                trace_sample_logprob = float(trace_sample_logprob_trace_ce)
-            try:
-                if st.latent_dir:
-                    os.makedirs(st.latent_dir, exist_ok=True)
-                    trace_path = os.path.join(st.latent_dir, f"seg{int(step_i):02d}_trace.pt")
-                    torch.save(
-                        {
-                            "segment_index": int(step_i),
-                            "obs_len": int(obs_len),
-                            "infer_num_frames": int(infer_num_frames),
-                            "injection": str(injection),
-                            "infinity_cfg": float(cfg.infinity.cfg),
-                            "tau_list": [float(x) for x in tau_list],
-                            "top_k": int(top_k),
-                            "top_p": float(top_p),
-                            "pn": str(cfg.infinity.pn),
-                            "h_div_w_template": float(st.h_div_w_template),
-                            "dynamic_scale_schedule": str(cfg.infinity.dynamic_scale_schedule),
-                            "mask_type": str(cfg.infinity.mask_type),
-                            "scale_schedule": sched.scale_schedule,
-                            "context_info": sched.context_info,
-                            "gt_leak": int(gt_leak),
-                            "gt_ls_Bl": (
-                                [t.detach().to("cpu") for t in gt_ls_Bl]
-                                if isinstance(gt_ls_Bl, list)
-                                else None
-                            ),
-                            # Clip-id target for this segment (49f clip4 schedule: clip0=image, clip1..3=video clips).
-                            # seg00->clip1 (2..17), seg01->clip2 (18..33), seg02->clip3 (34..49).
-                            "clipid_target": int(step_i) + 1,
-                            "step_clipids": out_gen.get("step_clipids", None),
-                            "sample_logprob": float(trace_sample_logprob),
-                            "sample_logprob_sampling": float(trace_sample_logprob_sampling),
-                            "sample_logprob_trace_ce": (
-                                float(trace_sample_logprob_trace_ce)
-                                if trace_sample_logprob_trace_ce is not None
-                                else None
-                            ),
-                            "trace_ce_select_si_list": trace_ce_select_si_list if "trace_ce_select_si_list" in locals() else None,
-                            "trace_ce_total_tokens": int(total_tokens) if "total_tokens" in locals() else None,
-                            "trace_ce_tmax": int(tmax) if "tmax" in locals() else None,
-                            "sample_logprob_by_clip": out_gen.get("sample_logprob_by_clip", None),
-                            "idx_trace": out_gen.get("idx_trace", None),
-                            "image_scale_repetition": str(getattr(_infinity_args, "image_scale_repetition", "")),
-                            "video_scale_repetition": str(getattr(_infinity_args, "video_scale_repetition", "")),
-                        },
-                        trace_path,
-                    )
-            except Exception as e:
-                print(f"[trace->file] save skipped: {e}")
-                trace_path = None
-        if not isinstance(summed_codes, torch.Tensor):
-            raise RuntimeError(f"Unexpected Infinity output type: {type(out_gen)}")
 
         pred_vid: Optional[torch.Tensor] = None
         want_decode = bool(st.latent_dir) or bool(need_pred_video)
@@ -1451,7 +1593,7 @@ def _infer_summed_codes_for_step(
         raise
 
     st.stream.correction_clear_pred()
-    return summed_codes, pred_vid, float(trace_sample_logprob), trace_path
+    return summed_codes, pred_vid
 
 
 def _save_latent_tensor(st: TrajectoryState, name: str, t: torch.Tensor) -> None:
@@ -1638,8 +1780,6 @@ class SegmentInferResult:
     obs_len: int
     next_obs_len: int
     total_num_frames: int
-    sample_logprob: float
-    trace_path: Optional[str]
 
 
 def _infer_latents_for_actions_and_advance_cache(
@@ -1674,11 +1814,15 @@ def _infer_latents_for_actions_and_advance_cache(
     step_top_p = float(cfg.infinity.late_top_p) if use_late else float(cfg.infinity.top_p)
     inj = str(cfg.infinity.late_v2v_history_injection or cfg.infinity.v2v_history_injection) if use_late else str(cfg.infinity.v2v_history_injection)
 
-    # Early-stop rollout: each segment only infers up to its own next_obs_len.
-    # seg00: infer to 17f (predict 2..17), seg01: infer to 33f (predict 18..33), seg02: infer to 49f (predict 34..49).
-    infer_num_frames = int(next_obs_len)
+    infer_num_frames = int(cfg.infinity.num_frames)
+    if (
+        bool(cfg.infinity.rolling_tail_infer)
+        and str(cfg.infinity.rolling_infer_mode) == "tail_window"
+        and int(segment_index) >= int(cfg.infinity.tail_window_start_step)
+    ):
+        infer_num_frames = int(cfg.infinity.tail_window_frames)
 
-    summed_codes, pred_vid, step_logprob, step_trace_path = _infer_summed_codes_for_step(
+    summed_codes, pred_vid = _infer_summed_codes_for_step(
         st,
         step_i=int(segment_index),
         obs_len=obs_len,
@@ -1690,13 +1834,11 @@ def _infer_latents_for_actions_and_advance_cache(
         need_pred_video=bool(need_pred_video),
     )  # [1,16,pt_local,H,W]
 
-    # For early-stop inference, treat the predicted horizon as the "total" timeline for slicing.
-    total_num_frames = int(infer_num_frames)
+    total_num_frames = int(cfg.infinity.num_frames)
     abs_end_lat = (int(next_obs_len) - 1) // 4 + 1  # absolute end latent after this segment
 
     latent5_input: torch.Tensor
-    force_full_window = bool(getattr(st, "last_req_prefix_mode", False))
-    if int(segment_index) == 0 or st.last_latent_1 is None or force_full_window:
+    if int(segment_index) == 0 or st.last_latent_1 is None:
         # seg0 (or resume failure): provide full 5-latent window [end-4..end]
         abs_start_lat = max(1, int(abs_end_lat) - 4)
         latent5_input = _slice_abs_latents_from_summed_codes(
@@ -1779,8 +1921,6 @@ def _infer_latents_for_actions_and_advance_cache(
         obs_len=int(obs_len),
         next_obs_len=int(next_obs_len),
         total_num_frames=int(total_num_frames),
-        sample_logprob=float(step_logprob),
-        trace_path=step_trace_path,
     )
 
 
@@ -1960,7 +2100,7 @@ def _actionhead_ref_predict_actions_cm_deg(
 if FASTAPI_AVAILABLE:
     app = FastAPI(
         title="InfinityStar+TSformer Action API",
-        description="InfinityStar summed_codes (latents) -> TSformer(P2P) delta actions (cm/deg). num_frames/step are configurable via config.json.",
+        description="InfinityStar summed_codes (latents) -> action deltas (cm/deg). In tsformer_latent mode, uses Stage2 latent2action (decoder-features -> adapter tokens -> TimesFormer sliding windows).",
         version="0.1.0",
     )
 
@@ -1978,7 +2118,7 @@ if FASTAPI_AVAILABLE:
             "tsformer_latent",
             description=(
                 "Action head mode. "
-                "'tsformer_latent' (default): 5 latents -> 4 actions per segment. "
+                "'tsformer_latent' (default): Stage2 latent2action (decoder-features -> adapter tokens -> TimesFormer sliding windows) -> 16 actions per 16-frame segment. "
                 "'actionhead_ref_vit': decode Infinity predicted video to RGB frames and run a 4-frame sliding-window ViT "
                 "(stride=1, overlapping windows aggregated) to output 16 actions per 16-frame clip."
             ),
@@ -2018,7 +2158,7 @@ if FASTAPI_AVAILABLE:
     class PredictDeltaActionsResponse(BaseModel):
         actions: List[List[float]] = Field(
             ...,
-            description="Delta actions list; each is [dx_cm,dy_cm,dz_cm,droll_deg,dyaw_deg,dpitch_deg]. Length depends on action_head_mode (tsformer_latent: 4 per segment; actionhead_ref_vit: 16 per 16-frame clip).",
+            description="Delta actions list; each is [dx_cm,dy_cm,dz_cm,droll_deg,dyaw_deg,dpitch_deg]. Length depends on action_head_mode (tsformer_latent: 16 per segment; actionhead_ref_vit: 16 per 16-frame clip).",
         )
         segment_index: int = Field(
             ...,
@@ -2028,8 +2168,6 @@ if FASTAPI_AVAILABLE:
         prefix_latents: int
         done: bool
         used_prompt: Optional[str] = None
-        segment_old_logprob: Optional[float] = None
-        segment_trace_path: Optional[str] = None
 
     @app.get("/health")
     async def health():
@@ -2045,7 +2183,8 @@ if FASTAPI_AVAILABLE:
             "status": "ok",
             "device": _DEVICE,
             "dtype": str(_DTYPE),
-            "ts_ckpt_loaded": _ts_model is not None,
+            "ts_ckpt_loaded": _s2_tsformer is not None,
+            "stage2_ckpt": _s2_ckpt_path,
             "infinity_loaded": _infinity_session_template is not None,
             "active_sessions": len(_TRAJ),
             "num_frames": int(cfg.infinity.num_frames),
@@ -2175,8 +2314,7 @@ def _predict_delta_actions_impl(req) -> "PredictDeltaActionsResponse":
                 pass
 
     # If client sends full prefix each time, keep only the new tail frames.
-    st.last_req_prefix_mode = bool(getattr(req, "prefix_mode", False))
-    if bool(st.last_req_prefix_mode):
+    if bool(getattr(req, "prefix_mode", False)):
         already = int(st.num_frames())
         if already > int(len(new_imgs)):
             raise HTTPException(
@@ -2289,10 +2427,38 @@ def _predict_delta_actions_impl(req) -> "PredictDeltaActionsResponse":
         ckpt_path = os.environ.get("ACTIONHEAD_CKPT", "").strip() or os.environ.get("ACTIONHEAD_REF_CKPT", "").strip()
         run_cfg = os.environ.get("ACTIONHEAD_RUN_CONFIG", "").strip() or os.environ.get("ACTIONHEAD_REF_RUN_CONFIG", "").strip()
         if not ckpt_path or not run_cfg:
-            raise HTTPException(
-                status_code=500,
-                detail="actionhead_ref_vit requires env ACTIONHEAD_CKPT and ACTIONHEAD_RUN_CONFIG (or ACTIONHEAD_REF_CKPT/ACTIONHEAD_REF_RUN_CONFIG)",
-            )
+            # Backward-compat bridge:
+            # Some frontends always send actionhead_ref_vit, but the server may want to run the new
+            # Stage2 latent2action path (decoder-features -> adapter tokens -> TimesFormer) instead.
+            # If Stage2 checkpoint is configured, fall back to it; otherwise keep the original error.
+            s2_ckpt = os.environ.get("STAGE2_LATENT2ACTION_CKPT", "").strip() or (DEFAULT_STAGE2_LATENT2ACTION_CKPT or "")
+            if s2_ckpt:
+                try:
+                    print("[Service] actionhead_ref_vit missing ACTIONHEAD_CKPT/RUN_CONFIG; fallback to stage2 latent2action (16 actions).")
+                    _init_stage2_latent2action_models(ckpt_path=s2_ckpt)
+                    actions = _stage2_predict_16_actions_for_segment_cm_deg(st=st, infer_res=infer_res, stride=1)
+                    # IMPORTANT: fallback succeeded. Do NOT continue to initialize/run actionhead_ref_vit.
+                    st.last_emitted_segment = seg
+                    return PredictDeltaActionsResponse(  # type: ignore[name-defined]
+                        actions=actions,
+                        segment_index=seg,
+                        num_received_frames=n,
+                        prefix_latents=int(prefix_latents_abs),
+                        done=bool(done or ((ready_last_future or (ready_future and is_last_seg)) and is_last_seg)),
+                        used_prompt=st.prompt_raw if getattr(req, "debug", False) else None,
+                    )
+                except Exception as e:
+                    print("[Service] stage2 fallback for actionhead_ref_vit failed.")
+                    print(traceback.format_exc())
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"actionhead_ref_vit requires env ACTIONHEAD_CKPT and ACTIONHEAD_RUN_CONFIG; stage2 fallback failed: {e}",
+                    )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail="actionhead_ref_vit requires env ACTIONHEAD_CKPT and ACTIONHEAD_RUN_CONFIG (or ACTIONHEAD_REF_CKPT/ACTIONHEAD_REF_RUN_CONFIG)",
+                )
         try:
             _init_actionhead_model(ckpt_path=ckpt_path, run_config_path=run_cfg)
             pred_vid = infer_res.pred_vid_bgr
@@ -2351,15 +2517,14 @@ def _predict_delta_actions_impl(req) -> "PredictDeltaActionsResponse":
             print(traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"actionhead_ref_vit inference failed: {e}")
     else:
-        # TSformer(P2P): 5 latents -> 4 actions (cm/deg)
+        # Stage2 latent2action: decoder-features -> adapter tokens -> TimesFormer sliding windows -> 16 actions (cm/deg)
         try:
-            latent5 = infer_res.latent5_input
-            actions_t = _tsformer_predict_actions_from_summed_codes(latent5, prefix_latents=int(latent5.shape[2]))  # (4,6)
-            actions = actions_t.tolist()
+            _init_stage2_latent2action_models(ckpt_path=os.environ.get("STAGE2_LATENT2ACTION_CKPT", "").strip() or DEFAULT_STAGE2_LATENT2ACTION_CKPT)
+            actions = _stage2_predict_16_actions_for_segment_cm_deg(st=st, infer_res=infer_res, stride=1)
         except Exception as e:
-            print("[Service] TSformer inference failed.")
+            print("[Service] Stage2 latent2action inference failed.")
             print(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=f"TSformer inference failed: {e}")
+            raise HTTPException(status_code=500, detail=f"stage2 latent2action inference failed: {e}")
 
     st.last_emitted_segment = seg
     if not FASTAPI_AVAILABLE:
@@ -2371,8 +2536,6 @@ def _predict_delta_actions_impl(req) -> "PredictDeltaActionsResponse":
         prefix_latents=int(prefix_latents_abs),
         done=bool(done or ((ready_last_future or (ready_future and is_last_seg)) and is_last_seg)),
         used_prompt=st.prompt_raw if getattr(req, "debug", False) else None,
-        segment_old_logprob=float(getattr(infer_res, "sample_logprob", 0.0)),
-        segment_trace_path=getattr(infer_res, "trace_path", None),
     )
 
 

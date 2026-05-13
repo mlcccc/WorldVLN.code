@@ -62,4 +62,4 @@ case "${ACTION_HEAD_MODE}" in
 esac
 
 cd "${SCRIPT_DIR}"
-exec "${PYTHON_BIN}" -m uvicorn infinity_tsformer_api_server:app --host "${HOST}" --port "${PORT}"
+exec "${PYTHON_BIN}" -m uvicorn grpo_server:app --host "${HOST}" --port "${PORT}"

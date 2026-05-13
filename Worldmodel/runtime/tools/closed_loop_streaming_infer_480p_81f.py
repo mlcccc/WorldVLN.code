@@ -7,7 +7,7 @@ InfinityStar 流式推理辅助脚本。
 
 当前在开源整理后的项目里，这个文件主要承担两类用途：
 
-- 作为 `infinity_tsformer_api_server.py` 复用的参数构造入口。
+- 作为 `infer/server.py` 与 `action_aware_grpo/grpo_server.py` 复用的参数构造入口。
 - 在需要离线排查时，对一段真实帧序列执行一次完整的流式回放。
 
 你只需要准备一个按时间顺序命名的真实帧目录和对应的 prompt 信息，

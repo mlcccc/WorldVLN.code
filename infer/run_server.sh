@@ -20,7 +20,7 @@ export STAGE2_LATENT2ACTION_CKPT="${STAGE2_LATENT2ACTION_CKPT:-${SCRIPT_DIR}/che
 mkdir -p "${INFINITY_LATENT_CACHE_ROOT}"
 
 exec "${PYTHON_BIN}" -m uvicorn \
-  infinity_tsformer_api_server:app \
+  server:app \
   --host "${HOST}" \
   --port "${PORT}"
 

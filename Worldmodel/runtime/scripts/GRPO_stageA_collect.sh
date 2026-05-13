@@ -93,7 +93,7 @@ TASK_REWARD_MODE="${TASK_REWARD_MODE:-raw_dense}"
 REQUIRE_ALL_TRAJECTORIES="${REQUIRE_ALL_TRAJECTORIES:-0}"
 REQUIRE_OLD_LOGPROB="${REQUIRE_OLD_LOGPROB:-1}"
 # Real rollout checkpoints/configs
-INFINITY_API_PY="${INFINITY_API_PY:-${REPO_ROOT}/action_aware_grpo/infinity_tsformer_api_server.py}"
+INFINITY_API_PY="${INFINITY_API_PY:-${REPO_ROOT}/action_aware_grpo/grpo_server.py}"
 INFINITY_SERVER_CONFIG="${INFINITY_SERVER_CONFIG:-${REPO_ROOT}/action_aware_grpo/config.json}"
 INFINITY_CKPT="${INFINITY_CKPT:-}"
 INFINITY_REPO_ROOT="${INFINITY_REPO_ROOT:-${ROOT_DIR}}"

@@ -40,19 +40,11 @@ Download the weights to your preferred checkpoint directory and configure the re
 
 ## Inference
 
-The repository currently provides two main inference surfaces.
+The repository currently provides two main inference entry points.
 
 ![WorldVLN model](./assets/model.png)
 
 ### Online Inference Service
-
-The online service lives under [infer/](./infer) and is intended for deployment-oriented usage.
-
-- Entry points: [infer/run_server.sh](./infer/run_server.sh), [infer/infinity_tsformer_api_server.py](./infer/infinity_tsformer_api_server.py)
-- Configuration: [infer/config.json](./infer/config.json)
-- Typical usage: serve the model behind an HTTP API for online prediction or system integration
-
-At a high level, this service consumes the current observation context and model inputs, then returns action predictions through the API server.
 
 #### Quick start
 
@@ -74,6 +66,12 @@ Common environment variables:
 - `INFINITY_REPO_ROOT`: optional override for the default `Worldmodel/runtime/`
 - `INFINITY_LATENT_CACHE_ROOT`: runtime cache directory used by the service
 - `HOST`, `PORT`: bind address for Uvicorn
+
+#### Details
+
+- Entry points: [infer/run_server.sh](./infer/run_server.sh), [infer/server.py](./infer/server.py)
+- Configuration: [infer/config.json](./infer/config.json)
+- Windows-side client: [infer/client.py](./infer/client.py)
 
 ### Batch Latent-to-Action Inference
 
@@ -133,28 +131,40 @@ This repository is organized into two stages:
 
 #### Backbone Training
 
-The backbone finetuning workflow is located under [train/](./train).
-
-- Entry point: [train/scripts/train_from_base.sh](./train/scripts/train_from_base.sh)
-- Main trainer: [train/train.py](./train/train.py)
-- Detailed guide: [train/TRAINING.md](./train/TRAINING.md)
-
-Use this workflow when you want to fine-tune the WorldVLN backbone from base checkpoints.
-
 #### Quick start
 
 ```bash
 bash train/scripts/train_from_base.sh
 ```
 
+#### Details
+
+The backbone finetuning workflow is located under [train/](./train).
+
+- Entry point: [train/scripts/train_from_base.sh](./train/scripts/train_from_base.sh)
+- Main trainer: [train/train.py](./train/train.py)
+- Detailed guide: [train/TRAINING.md](./train/TRAINING.md)
+
 #### Action Decoder Training
 
-The action decoder workflow is located under [Worldmodel/action_decoder/src/](./Worldmodel/action_decoder/src) and is organized into two stages.
+#### Quick start (Stage A + Stage B)
 
-The action decoder training entrypoints live under [train/action_decoder/](./train/action_decoder) and are organized into two stages.
+```bash
+# Stage A: adapter distillation
+bash train/action_decoder/scripts/train_stage1_ddp.sh
 
-- Stage 1 adapter distillation: [train/action_decoder/scripts/train_stage1_ddp.sh](./train/action_decoder/scripts/train_stage1_ddp.sh)
-- Stage 2 latent-to-action training: [train/action_decoder/scripts/train_stage2_ddp.sh](./train/action_decoder/scripts/train_stage2_ddp.sh)
+# Stage B: latent-to-action training
+bash train/action_decoder/scripts/train_stage2_ddp.sh
+```
+
+#### Details
+
+The action decoder workflow is located under [Worldmodel/action_decoder/src/](./Worldmodel/action_decoder/src) and is organized into two steps (Stage A + Stage B).
+
+The action decoder training entrypoints live under [train/action_decoder/](./train/action_decoder) and are organized into two steps:
+
+- Stage A adapter distillation: [train/action_decoder/scripts/train_stage1_ddp.sh](./train/action_decoder/scripts/train_stage1_ddp.sh)
+- Stage B latent-to-action training: [train/action_decoder/scripts/train_stage2_ddp.sh](./train/action_decoder/scripts/train_stage2_ddp.sh)
 - Main scripts: [train/action_decoder/tools/train_stage1_ddp.py](./train/action_decoder/tools/train_stage1_ddp.py), [train/action_decoder/tools/train_stage2_ddp.py](./train/action_decoder/tools/train_stage2_ddp.py)
 
 This workflow trains the mapping from visual latent features to 6-DoF motion outputs.
@@ -173,44 +183,32 @@ Data contract (training manifest):
 }
 ```
 
-Stage 1 required environment variables:
+Stage A required environment variables:
 
 - `MANIFEST_JSON`
 - `TSFORMER_CKPT`
 - `INF_VAE_PATH`
 
-Run Stage 1:
+Run Stage A:
 
 ```bash
 bash train/action_decoder/scripts/train_stage1_ddp.sh
 ```
 
-Stage 2 required environment variables:
+Stage B required environment variables:
 
 - `MANIFEST_JSON`
 - `TSFORMER_PRETRAINED`
 - `ADAPTER_CKPT`
 - `INFINITYSTAR_VAE_PATH`
 
-Run Stage 2:
+Run Stage B:
 
 ```bash
 bash train/action_decoder/scripts/train_stage2_ddp.sh
 ```
 
 ### Stage 2: Action-aware GRPO
-
-The action-aware GRPO workflow is located under [action_aware_grpo/](./action_aware_grpo) and is organized into two steps: **rollout** and **train**.
-
-- Rollout collection: [action_aware_grpo/scripts/run_stagea_collect.sh](./action_aware_grpo/scripts/run_stagea_collect.sh)
-- Train (partial-freeze optimization): [action_aware_grpo/scripts/run_stageb_partialfreeze.sh](./action_aware_grpo/scripts/run_stageb_partialfreeze.sh)
-- Remote simulator service wrapper: [action_aware_grpo/scripts/run_remote_sim_service.sh](./action_aware_grpo/scripts/run_remote_sim_service.sh)
-- Local inference launcher used by rollout: [action_aware_grpo/run_infer_server.sh](./action_aware_grpo/run_infer_server.sh)
-
-At a high level:
-
-- Rollout consumes rollout sources and model assets, then generates rollout caches and replay metadata.
-- Train consumes replay metadata and runs optimization to produce updated checkpoints and logs.
 
 #### Quick start (rollout + train)
 
@@ -255,6 +253,21 @@ RUSH_RESUME=/path/to/infinity/global_step_xxx.pth \
 REPLAY_META_DIR=/path/to/replay_meta_rollout_smoke \
 bash action_aware_grpo/scripts/run_stageb_partialfreeze.sh PARTIAL_FREEZE_MODE=smoke RUN_ID=stageb_smoke
 ```
+
+#### Details
+
+The action-aware GRPO workflow is located under [action_aware_grpo/](./action_aware_grpo) and is organized into two steps: **rollout** and **train**.
+
+- Server entry point: [action_aware_grpo/grpo_server.py](./action_aware_grpo/grpo_server.py)
+- Rollout collection: [action_aware_grpo/scripts/run_stagea_collect.sh](./action_aware_grpo/scripts/run_stagea_collect.sh)
+- Train (partial-freeze optimization): [action_aware_grpo/scripts/run_stageb_partialfreeze.sh](./action_aware_grpo/scripts/run_stageb_partialfreeze.sh)
+- Remote simulator service wrapper: [action_aware_grpo/scripts/run_remote_sim_service.sh](./action_aware_grpo/scripts/run_remote_sim_service.sh)
+- Local inference launcher used by rollout: [action_aware_grpo/run_infer_server.sh](./action_aware_grpo/run_infer_server.sh)
+
+At a high level:
+
+- Rollout consumes rollout sources and model assets, then generates rollout caches and replay metadata.
+- Train consumes replay metadata and runs optimization to produce updated checkpoints and logs.
 
 For simulator-backed rollout details, see [action_aware_grpo/docs/remote_sim.md](./action_aware_grpo/docs/remote_sim.md).
 
