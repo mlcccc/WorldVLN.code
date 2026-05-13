@@ -4,12 +4,12 @@
 #   pip install -r requirements.txt
 #
 # This file consolidates dependencies across:
-# - Train_WAM/action_decoder (latent-to-action training & batch inference)
-# - posttrain/InfinityStar-main (post-training and shared model deps)
+# - Worldmodel/action_decoder/src (latent-to-action training & batch inference)
+# - Worldmodel/runtime (RL post-training and shared world-model deps)
 # - infer (online API service)
 
--r Train_WAM/action_decoder/requirements.txt
--r posttrain/InfinityStar-main/requirements.txt
+-r Worldmodel/action_decoder/src/requirements.txt
+-r Worldmodel/runtime/requirements.txt
 
 fastapi
 uvicorn

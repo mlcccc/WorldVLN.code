@@ -1,6 +1,6 @@
 {
   "infinity": {
-    "ckpt": "checkpoints/infinity/global_step_local_best.pth",
+    "ckpt": "",
     "num_frames": 49,
     "step": 16,
     "fps": 16,
@@ -14,7 +14,7 @@
     "top_k": 900,
     "top_p": 0.97,
     "gt_leak_first": 14,
-    "rolling_tail_infer": false,
+    "rolling_tail_infer": true,
     "rolling_infer_mode": "tail_window",
     "tail_window_frames": 33,
     "tail_window_start_step": 1,
@@ -29,3 +29,4 @@
     "stats": ""
   }
 }
+

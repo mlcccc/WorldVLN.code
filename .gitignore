@@ -9,12 +9,13 @@ venv/
 env/
 
 # Local caches / runtime artifacts (do not commit)
-.cache/
-outputs/
-logs/
-checkpoints/
-data/
-dataset/
+**/.cache/
+**/cache/
+**/outputs/
+**/logs/
+**/checkpoints/
+**/data/
+**/dataset/
 
 # Common ML artifacts
 *.pth

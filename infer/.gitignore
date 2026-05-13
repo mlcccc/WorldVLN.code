@@ -11,8 +11,5 @@ cache/
 *.pth
 
 checkpoints/
-InfinityStar-main/checkpoint/
-TSformer-VO-main/checkpoint/
-TSformer-VO-main/checkpoints/
-TSformer-VO-main/__pycache__/
+cache/
 

@@ -17,20 +17,20 @@ If you want to preserve only the `InfinityStar -> latent2action` online service 
 - `infinity_tsformer_api_server.py`
 - `config.json`
 - `run_server.sh`
-- `InfinityStar-main/infinity/`
-- `InfinityStar-main/tools/closed_loop_streaming_infer_480p_81f.py`
-- `InfinityStar-main/tools/infinity_streaming_session.py`
-- `InfinityStar-main/tools/run_infinity.py`
-- `TSformer-VO-main/timesformer/`
-- `TSformer-VO-main/models/vae96_to_tsformer_adapter.py`
+- `../Worldmodel/runtime/infinity/`
+- `../Worldmodel/runtime/tools/closed_loop_streaming_infer_480p_81f.py`
+- `../Worldmodel/runtime/tools/infinity_streaming_session.py`
+- `../Worldmodel/runtime/tools/run_infinity.py`
+- `../Worldmodel/action_decoder/actionhead_runtime/timesformer/`
+- `../Worldmodel/action_decoder/actionhead_runtime/models/vae96_to_tsformer_adapter.py`
 
 ## Optional Files
 
 The following files are not required for the main online serving path, but may still be useful for local debugging or experimentation:
 
 - `config.local_bestrecord.json`
-- `TSformer-VO-main/pretrain_latent_p2p.py`
-- `TSformer-VO-main/latent_patch_embed.py`
+- `../train/action_decoder/actionhead_training/pretrain_latent_p2p.py`
+- `../train/action_decoder/actionhead_training/latent_patch_embed.py`
 
 ## Files That Should Not Be Published
 
@@ -47,7 +47,7 @@ When pruning vendored trees, retain only the source files needed by the publishe
 
 ## Notes
 
-- The current package no longer depends on an external `Actiondecoder/TSformer-VO-main` checkout; the required code is bundled locally under `TSformer-VO-main/`.
+- The inference package now reuses the top-level `Worldmodel/` and `action_decoder/` folders instead of vendoring separate copies.
 - Default paths have been converted to repository-relative behavior where possible.
 - Model weights should continue to be supplied through environment variables or mounted local paths rather than committed into the repository.
 

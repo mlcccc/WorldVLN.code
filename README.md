@@ -9,11 +9,12 @@ The current codebase is organized into three major components:
 
 | Directory | Description |
 | --- | --- |
-| [Train_WAM/](./Train_WAM) | Training package for backbone finetuning and the latent-to-action **action decoder** (training, batch inference, evaluation). |
+| [Worldmodel/](./Worldmodel) | Model code. `runtime/` is shared by `infer/` and RL workflows; `infinity/` provides the Python package used by `train/`; `action_decoder/` contains the latent-to-action decoder architecture and runtime action head. |
+| [train/](./train) | Backbone finetuning launcher (uses `Worldmodel/infinity/`). |
 | [infer/](./infer) | Online inference service for serving the model as an API. |
-| [posttrain/](./posttrain) | Post-training workflows: **rollout** collection and **train** (optimization), including simulator-backed rollout support. |
+| [reinforcement_learning/](./reinforcement_learning) | RL post-training workflows: **rollout** collection and **train** (optimization), including simulator-backed rollout support. |
 
-At a high level, `Train_WAM/` covers model training and offline prediction utilities, `infer/` covers deployment-oriented inference, and `posttrain/` covers the later-stage optimization pipeline.
+At a high level, `Worldmodel/` provides shared model code, `train/` covers backbone finetuning, `infer/` covers deployment-oriented inference, and `reinforcement_learning/` covers RL post-training workflows.
 
 ## Installation
 
@@ -56,13 +57,13 @@ Depending on the workflow, you may also need additional runtime assets that are 
 
 | Asset | Typical Variable or Path | Used By |
 | --- | --- | --- |
-| InfinityStar checkpoint | `INFINITY_CKPT` | `infer/`, `posttrain/` |
-| Shared T5 and VAE assets | `CHECKPOINTS_DIR` | `posttrain/` and local inference flows |
-| Action-head checkpoint | `ACTIONHEAD_CKPT` | `infer/`, `posttrain/` |
-| Action-head config | `ACTIONHEAD_RUN_CONFIG` | `infer/`, `posttrain/` |
-| Rollout manifest JSON | `SRC_JSON` | `posttrain` rollout |
-| UAV-Flow task JSON root | `UAVFLOW_TASK_JSON_ROOT` | `posttrain` remote simulator rollout |
-| Replay metadata | `REPLAY_META_DIR` | `posttrain` train |
+| InfinityStar checkpoint | `INFINITY_CKPT` | `infer/`, `reinforcement_learning/` |
+| Shared T5 and VAE assets | `CHECKPOINTS_DIR` | `reinforcement_learning/` and local inference flows |
+| Action-head checkpoint | `ACTIONHEAD_CKPT` | `infer/`, `reinforcement_learning/` |
+| Action-head config | `ACTIONHEAD_RUN_CONFIG` | `infer/`, `reinforcement_learning/` |
+| Rollout manifest JSON | `SRC_JSON` | `reinforcement_learning` rollout |
+| UAV-Flow task JSON root | `UAVFLOW_TASK_JSON_ROOT` | `reinforcement_learning` remote simulator rollout |
+| Replay metadata | `REPLAY_META_DIR` | `reinforcement_learning` train |
 
 Notes:
 
@@ -102,7 +103,7 @@ Common environment variables:
 - `INFINITY_CKPT`: main InfinityStar / WorldVLN checkpoint used by the service
 - `STAGE2_LATENT2ACTION_CKPT`: Stage-2 latent-to-action checkpoint for action prediction
 - `INFINITY_SERVER_CONFIG`: optional override for `infer/config.json`
-- `INFINITY_REPO_ROOT`: optional override for the bundled `infer/InfinityStar-main/`
+- `INFINITY_REPO_ROOT`: optional override for the default `Worldmodel/runtime/`
 - `INFINITY_LATENT_CACHE_ROOT`: runtime cache directory used by the service
 - `HOST`, `PORT`: bind address for Uvicorn
 
@@ -110,10 +111,10 @@ Common environment variables:
 
 This path is intended for **offline** inference and evaluation on route-level data (as opposed to online serving).
 
-The batch inference entrypoints live under `Train_WAM/action_decoder/`:
+The batch inference entrypoints live under `train/action_decoder/tools/`:
 
-- Inference: [Train_WAM/action_decoder/tools/predict_pose.py](./Train_WAM/action_decoder/tools/predict_pose.py)
-- Evaluation: [Train_WAM/action_decoder/tools/eval_endpoints.py](./Train_WAM/action_decoder/tools/eval_endpoints.py)
+- Inference: [train/action_decoder/tools/predict_pose.py](./train/action_decoder/tools/predict_pose.py)
+- Evaluation: [train/action_decoder/tools/eval_endpoints.py](./train/action_decoder/tools/eval_endpoints.py)
 
 #### 1) Prepare route folders
 
@@ -132,11 +133,11 @@ Each route directory under `--data_root` should contain:
 From the repository root:
 
 ```bash
-python Train_WAM/action_decoder/tools/predict_pose.py \
+python train/action_decoder/tools/predict_pose.py \
   --ckpt <path/to/stage2_checkpoint>.pth \
   --data_root <route_root_dir> \
   --out_dir <output_root_dir> \
-  --infinitystar_root <path/to/InfinityStar-main> \
+  --infinitystar_root <path/to/Worldmodel/runtime> \
   --infinitystar_vae_path <path/to/infinitystar_videovae.pth>
 ```
 
@@ -145,7 +146,7 @@ Outputs are written per-route under `--out_dir/<route>/` and include `pred_actio
 #### 3) Evaluate endpoints (optional)
 
 ```bash
-python Train_WAM/action_decoder/tools/eval_endpoints.py \
+python train/action_decoder/tools/eval_endpoints.py \
   --gt_root <gt_route_root_dir> \
   --pred_root <output_root_dir> \
   --out_root <eval_out_dir>
@@ -159,27 +160,29 @@ Training code is provided for multiple stages of the WorldVLN stack.
 
 ### Backbone Training
 
-The backbone finetuning workflow is located under [Train_WAM/](./Train_WAM).
+The backbone finetuning workflow is located under [train/](./train).
 
-- Entry point: [Train_WAM/scripts/train_from_base.sh](./Train_WAM/scripts/train_from_base.sh)
-- Main trainer: [Train_WAM/train.py](./Train_WAM/train.py)
-- Detailed guide: [Train_WAM/TRAINING.md](./Train_WAM/TRAINING.md)
+- Entry point: [train/scripts/train_from_base.sh](./train/scripts/train_from_base.sh)
+- Main trainer: [train/train.py](./train/train.py)
+- Detailed guide: [train/TRAINING.md](./train/TRAINING.md)
 
 Use this workflow when you want to fine-tune the WorldVLN backbone from base checkpoints.
 
 #### Quick start
 
 ```bash
-bash Train_WAM/scripts/train_from_base.sh
+bash train/scripts/train_from_base.sh
 ```
 
 ### Action Decoder Training
 
-The action decoder workflow is located under [Train_WAM/action_decoder/](./Train_WAM/action_decoder) and is organized into two stages.
+The action decoder workflow is located under [Worldmodel/action_decoder/src/](./Worldmodel/action_decoder/src) and is organized into two stages.
 
-- Stage 1 adapter distillation: [Train_WAM/action_decoder/scripts/train_stage1_ddp.sh](./Train_WAM/action_decoder/scripts/train_stage1_ddp.sh)
-- Stage 2 latent-to-action training: [Train_WAM/action_decoder/scripts/train_stage2_ddp.sh](./Train_WAM/action_decoder/scripts/train_stage2_ddp.sh)
-- Main scripts: [Train_WAM/action_decoder/tools/train_stage1_ddp.py](./Train_WAM/action_decoder/tools/train_stage1_ddp.py), [Train_WAM/action_decoder/tools/train_stage2_ddp.py](./Train_WAM/action_decoder/tools/train_stage2_ddp.py)
+The action decoder training entrypoints live under [train/action_decoder/](./train/action_decoder) and are organized into two stages.
+
+- Stage 1 adapter distillation: [train/action_decoder/scripts/train_stage1_ddp.sh](./train/action_decoder/scripts/train_stage1_ddp.sh)
+- Stage 2 latent-to-action training: [train/action_decoder/scripts/train_stage2_ddp.sh](./train/action_decoder/scripts/train_stage2_ddp.sh)
+- Main scripts: [train/action_decoder/tools/train_stage1_ddp.py](./train/action_decoder/tools/train_stage1_ddp.py), [train/action_decoder/tools/train_stage2_ddp.py](./train/action_decoder/tools/train_stage2_ddp.py)
 
 This workflow trains the mapping from visual latent features to 6-DoF motion outputs.
 
@@ -206,7 +209,7 @@ Stage 1 required environment variables:
 Run Stage 1:
 
 ```bash
-bash Train_WAM/action_decoder/scripts/train_stage1_ddp.sh
+bash train/action_decoder/scripts/train_stage1_ddp.sh
 ```
 
 Stage 2 required environment variables:
@@ -219,17 +222,17 @@ Stage 2 required environment variables:
 Run Stage 2:
 
 ```bash
-bash Train_WAM/action_decoder/scripts/train_stage2_ddp.sh
+bash train/action_decoder/scripts/train_stage2_ddp.sh
 ```
 
 ### Post-Training
 
-The post-training workflow is located under [posttrain/](./posttrain) and is organized into two steps: **rollout** and **train**.
+The RL post-training workflow is located under [reinforcement_learning/](./reinforcement_learning) and is organized into two steps: **rollout** and **train**.
 
-- Rollout collection: [posttrain/scripts/run_stagea_collect.sh](./posttrain/scripts/run_stagea_collect.sh)
-- Train (partial-freeze optimization): [posttrain/scripts/run_stageb_partialfreeze.sh](./posttrain/scripts/run_stageb_partialfreeze.sh)
-- Remote simulator service wrapper: [posttrain/scripts/run_remote_sim_service.sh](./posttrain/scripts/run_remote_sim_service.sh)
-- Local inference launcher used by rollout: [posttrain/run_infer_server.sh](./posttrain/run_infer_server.sh)
+- Rollout collection: [reinforcement_learning/scripts/run_stagea_collect.sh](./reinforcement_learning/scripts/run_stagea_collect.sh)
+- Train (partial-freeze optimization): [reinforcement_learning/scripts/run_stageb_partialfreeze.sh](./reinforcement_learning/scripts/run_stageb_partialfreeze.sh)
+- Remote simulator service wrapper: [reinforcement_learning/scripts/run_remote_sim_service.sh](./reinforcement_learning/scripts/run_remote_sim_service.sh)
+- Local inference launcher used by rollout: [reinforcement_learning/run_infer_server.sh](./reinforcement_learning/run_infer_server.sh)
 
 At a high level:
 
@@ -245,21 +248,30 @@ INFINITY_CKPT=/path/to/infinity/global_step_xxx.pth \
 CHECKPOINTS_DIR=/path/to/checkpointsinf \
 ACTIONHEAD_CKPT=/path/to/actionhead/checkpoint_last.pth \
 ACTIONHEAD_RUN_CONFIG=/path/to/actionhead/run_config.json \
-bash posttrain/run_infer_server.sh
+bash reinforcement_learning/run_infer_server.sh
 ```
 
 Run rollout collection:
 
 ```bash
+unset ALL_PROXY all_proxy
+export NO_PROXY=127.0.0.1,localhost
+
 SRC_JSON=/path/to/reference_video_full_49f_trajectory_prompts.json \
 INFINITY_CKPT=/path/to/infinity/global_step_xxx.pth \
 CHECKPOINTS_DIR=/path/to/checkpointsinf \
 ACTIONHEAD_CKPT=/path/to/actionhead/checkpoint_last.pth \
 ACTIONHEAD_RUN_CONFIG=/path/to/actionhead/run_config.json \
+CUDA_VISIBLE_DEVICES=0 \
+GRPO_LOCAL_GPU_IDS=0 \
+NPROC_PER_NODE=1 \
+NNODES=1 \
+NODE_RANK=0 \
 UAVFLOW_STAGEA_ROLLOUT_BACKEND=remote_sim \
 UAVFLOW_SIMULATOR_BASE_URL=http://127.0.0.1:18765 \
+UAVFLOW_SIMULATOR_TIMEOUT_S=120 \
 UAVFLOW_TASK_JSON_ROOT=/path/to/UAV-Flow-Eval/test_jsons \
-bash posttrain/scripts/run_stagea_collect.sh RUN_ID=remote_sim_smoke TOP_N=1 K_CAND=1 STAGEA_NPROC=1
+bash reinforcement_learning/scripts/run_stagea_collect.sh RUN_ID=remote_sim_smoke TOP_N=1 K_CAND=1 STAGEA_NPROC=1 STAGEA_PROGRESS_EVERY_N=1
 ```
 
 Run train (partial-freeze optimization):
@@ -268,10 +280,10 @@ Run train (partial-freeze optimization):
 CHECKPOINTS_DIR=/path/to/checkpointsinf \
 RUSH_RESUME=/path/to/infinity/global_step_xxx.pth \
 REPLAY_META_DIR=/path/to/replay_meta_rollout_smoke \
-bash posttrain/scripts/run_stageb_partialfreeze.sh PARTIAL_FREEZE_MODE=smoke RUN_ID=stageb_smoke
+bash reinforcement_learning/scripts/run_stageb_partialfreeze.sh PARTIAL_FREEZE_MODE=smoke RUN_ID=stageb_smoke
 ```
 
-For simulator-backed rollout details, see [posttrain/docs/remote_sim.md](./posttrain/docs/remote_sim.md).
+For simulator-backed rollout details, see [reinforcement_learning/docs/remote_sim.md](./reinforcement_learning/docs/remote_sim.md).
 
 ## License
 

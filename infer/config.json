@@ -25,7 +25,7 @@
     "lock_seed_across_steps": true
   },
   "tsformer": {
-    "ckpt": "TSformer-VO-main/checkpoints/legacy_p2p/checkpoint_e120.pth",
+    "ckpt": "",
     "stats": ""
   }
 }
