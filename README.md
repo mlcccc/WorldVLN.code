@@ -254,14 +254,6 @@ At a high level:
 
 For simulator-backed rollout details, see [action_aware_grpo/docs/remote_sim.md](./action_aware_grpo/docs/remote_sim.md).
 
-## Acknowledgement
-
-We sincerely thank the following work for their exceptional effort: InfinityStar, TSformer-vo.
-
-## Citation
-
-If you find this work useful, please cite the WorldVLN paper.
-
 ## License
 
 This project is released under the MIT License. See `LICENSE`.

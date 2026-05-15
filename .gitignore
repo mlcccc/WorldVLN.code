@@ -74,3 +74,8 @@ __pycache__/
 .cache/
 __pycache__/
 *.pyc
+
+# local caches
+.cache/
+__pycache__/
+*.pyc
