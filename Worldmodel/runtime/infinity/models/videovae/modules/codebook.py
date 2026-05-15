@@ -294,7 +294,7 @@ class MultiScaleCodebook(nn.Module):
         if self._need_init and self.training:
             self._init_embeddings(z)
 
-        # 永远维持THW的结构，差最近邻时候flat，然后会进行quant_res
+        # Always keep the (T,H,W) structure. For nearest-neighbor search we flatten, then apply quant_res.
         B, C, T, H, W = z.shape
 
         z_no_grad = z.detach()
@@ -317,23 +317,23 @@ class MultiScaleCodebook(nn.Module):
                 # latents
                 rest_z = z_no_grad - accu_h.data
 
-                if si != scale_num - 1: # z进行下采样
+                if si != scale_num - 1:  # downsample z
                     rest_z = F.interpolate(rest_z, size=(tpn, pn, pn), mode=self.z_interplote_down)
                 
                 z_NC =  rest_z.permute(0, 2, 3, 4, 1).reshape(-1, C)
 
-                # 这个尺度的 rest_z 与 codebook的 distances
+                # Distances between rest_z (at this scale) and the codebook embeddings
                 d_no_grad = torch.sum(z_NC.square(), dim=1, keepdim=True) + torch.sum(self.embeddings.square(), dim=1, keepdim=False)
                 d_no_grad.addmm_(z_NC, self.embeddings.t(), alpha=-2, beta=1)  
                 
-                # 转成离散ids
+                # Convert to discrete ids
                 encoding_indices = torch.argmin(d_no_grad, dim=1)
                 encode_onehot = F.one_hot(encoding_indices, self.n_codes).type_as(z_NC) # [bthw, ncode]
                 encoding_indices = encoding_indices.view(rest_z.shape[0], *rest_z.shape[2:]) # [b, t, h, w, ncode]
 
                 ms_encoding_indices.append(encoding_indices)
 
-                # id转回连续，用h_表述
+                # Convert ids back to continuous embeddings (denoted as h_)
                 h_BTHWC = F.embedding(encoding_indices, self.embeddings)    # [b, t, h, w, c]
                 h_BCTHW = h_BTHWC.permute(0, 4, 1, 2, 3).contiguous()    # [b, c, t, h, w]
 
@@ -341,14 +341,14 @@ class MultiScaleCodebook(nn.Module):
                                 
                 h_BCTHW = F.interpolate(h_BCTHW, size=(T, H, W), mode=self.z_interplote_up).contiguous()
 
-                # 加一个quant resi做卷积运算
+                # Apply a quantization residual convolution
                 quant_head = si / max(1, (scale_num - 1))
                 h_BCTHW = self.quant_resi[quant_head](h_BCTHW)
 
-                # h累加
+                # Accumulate h
                 accu_h = accu_h + h_BCTHW
 
-                commitment_loss += 0.25 * F.mse_loss(accu_h, z.detach())   # 0.25是一个beta
+                commitment_loss += 0.25 * F.mse_loss(accu_h, z.detach())  # 0.25 is a beta coefficient
 
                 if self.training:
                     all_flat_inputs.append(z_NC)

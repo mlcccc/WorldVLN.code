@@ -164,8 +164,8 @@ def video_encode(
             else:
                 first_frame_feature_ = first_frame_features[example_ind][0] # [B,d,1,h,w]
             # assert complete_raw_features.shape[-3] > 21
-            # 前21帧，构成一个 I1V1 的 clip
-            # 后面的 t-21 帧，构成一个 V2 的 clip，它的 condition 是 V1 resize 后的结果和 V1 的最后一帧
+            # First 21 frames form an I1V1 clip.
+            # The remaining (t-21) frames form a V2 clip, conditioned on the resized V1 output and V1's last frame.
             new_raw_features_list = [complete_raw_features[:,:,:21], complete_raw_features[:,:,21:]]
             t, h, w = new_raw_features_list[0].shape[-3:]
             h_div_w = h / w

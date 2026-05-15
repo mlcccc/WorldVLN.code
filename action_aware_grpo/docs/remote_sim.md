@@ -38,7 +38,7 @@ curl --noproxy '*' http://127.0.0.1:18765/health
 
 ## Rollout Settings
 
-The open-source reinforcement learning package keeps only remote_sim for rollout. Use the wrapper command below:
+The open-source action-aware GRPO package keeps only remote_sim for rollout. Use the wrapper command below:
 
 ```bash
 cd ./action_aware_grpo

@@ -651,7 +651,7 @@ def main():
         "--label_stats_json",
         type=str,
         default="",
-        help="可选：TSformer 训练时的 run_config.json（或仅包含 label_stats 的 json）。用于将 GT delta 归一化到 checkpoint 输出分布。",
+        help="Optional: TSformer training run_config.json (or a json that only contains label_stats). Used to normalize GT deltas to the checkpoint output distribution.",
     )
 
     ap.add_argument("--infinitystar_vae_path", type=str, required=True)
@@ -751,7 +751,7 @@ def main():
 
     seed_everything(int(args.seed) + get_rank())
     if not str(args.out_dir).strip():
-        raise ValueError("--out_dir 不能为空")
+        raise ValueError("--out_dir must be non-empty")
     os.makedirs(str(args.out_dir), exist_ok=True)
 
     global _RANK0_LOG_FH

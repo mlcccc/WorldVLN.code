@@ -2,25 +2,22 @@
 # -*- coding: utf-8 -*-
 
 """
-InfinityStar + TSformer(P2P) 在线推理 API 服务（与 openfly_api_server.py 同款“权重常驻”架构）
+Online inference API server used by action-aware GRPO workflows (weights-resident, streaming architecture).
 
-目标：
-- 服务启动时一次性加载 InfinityStar 与 TSformer 权重（常驻内存/GPU）
-- 客户端按轨迹（session_id）流式提交 RGB 图片序列：
-  - 首次提交 1 帧
-  - 后续可按 step 帧一批提交（也允许其它长度，但会累积到配置的 num_frames）
-- 服务端用 InfinityStar 在配置的 num_frames 下生成 summed_codes（latent，16 通道）
-- 取 summed_codes 的前 K 个 latent 时间步做 TSformer(P2P, window_size=2) 预测动作增量
-  - 第 0 段：K=5（对应像素帧 1..17），输出 4 个动作
-  - 第 i 段：K=5+4*i，取最后 4 个动作作为输出（每段覆盖 16 帧）
-- 输出动作增量单位：平移 cm、角度 deg
-- 6 维动作顺序（与 UAVFlow 日志/训练一致）：[dx, dy, dz, droll, dyaw, dpitch]
+Goals:
+- Load the world model and action head once at startup (kept resident in memory/GPU).
+- The client streams RGB frames per trajectory (`session_id`):
+  - First call: typically 1 warmup frame (and an optional instruction/prompt).
+  - Next calls: typically `step` frames per call (accumulated until `num_frames`).
+- The server runs the world model to produce summed_codes (latents), then predicts delta actions.
+  This entry point retains the legacy TSformer(P2P, window_size=2) path for compatibility.
+- Output delta actions are in cm/deg, ordered as: [dx, dy, dz, droll, dyaw, dpitch].
 
-运行示例：
+Example:
   export INFINITY_CKPT=/path/to/global_step_xxx.pth
   uvicorn grpo_server:app --host 0.0.0.0 --port 8002
 
-自测示例（需要真实 ckpt 与 route_dir）：
+Self-test (requires real checkpoints and a route_dir):
   python3 grpo_server.py --self_test \
     --infinity_ckpt "$INFINITY_CKPT" \
     --route_dir /path/to/route_dir

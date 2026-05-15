@@ -134,8 +134,11 @@ class OpenAIGPTModel(Model):
         if random.random() < self.log_prob:
             for ak in self.ak_state:
                 print(
-                    f"ak: {ak} 请求数：{self.ak_state[ak]}, 成功数：{self.ak_state_succ[ak]}, 成功率：{self.ak_state_succ[ak]/self.ak_state[ak]*100:.2f}%, 速度：{self.ak_state_succ[ak]/(time.time()-self.start_time)*60:.2f} 个/分钟")
-            print(f"token_stat：{self.token_stat}")
+                    f"ak: {ak} requests: {self.ak_state[ak]}, success: {self.ak_state_succ[ak]}, "
+                    f"success_rate: {self.ak_state_succ[ak]/self.ak_state[ak]*100:.2f}%, "
+                    f"speed: {self.ak_state_succ[ak]/(time.time()-self.start_time)*60:.2f} /min"
+                )
+            print(f"token_stat: {self.token_stat}")
 
         messages = []
         if system_prompt is not None:
@@ -143,18 +146,18 @@ class OpenAIGPTModel(Model):
         messages.append({"role": "user", "content": prompt})
 
         completion = client.chat.completions.create(
-            extra_headers={"X-TT-LOGID": "lizhe.xyz"},  # 请务必带上此header，方便定位问题
+            extra_headers={"X-TT-LOGID": "lizhe.xyz"},  # keep this header for log correlation/debugging
             model=client.temp_model_name,
             messages=messages,
             max_tokens=max_tokens
         )
         self.ak_state_succ[ak[:5]] += 1
         if self.token_stat_percent is not None:
-            # 输出token统计
+            # output-token statistics
             self._update(completion.usage.completion_tokens)
         
         if return_output_token_length:
-            # 允许输出token长度，便于筛选因输出达到max_tokens而被截断的数据
+            # optionally return output token length (useful to detect truncation at max_tokens)
             return completion.choices[0].message.content, completion.usage.completion_tokens
         return completion.choices[0].message.content
 

@@ -2,26 +2,22 @@
 # -*- coding: utf-8 -*-
 
 """
-InfinityStar + latent2action 在线推理 API 服务（与 openfly_api_server.py 同款“权重常驻”架构）
+Online inference API server for WorldVLN (weights-resident, streaming architecture).
 
-目标：
-- 服务启动时一次性加载 InfinityStar 与 TSformer 权重（常驻内存/GPU）
-- 客户端按轨迹（session_id）流式提交 RGB 图片序列：
-  - 首次提交 1 帧
-  - 后续可按 step 帧一批提交（也允许其它长度，但会累积到配置的 num_frames）
-- 服务端用 InfinityStar 在配置的 num_frames 下生成 summed_codes（latent，16 通道）
-- 默认动作头为 Stage2 latent2action：
-  - decoder feature -> adapter tokens -> TimesFormer sliding windows
-  - 每个 16 帧片段输出 16 个动作
-- 旧的 TSformer(P2P) 路径仍保留在离线工具里，仅用于兼容旧实验
-- 输出动作增量单位：平移 cm、角度 deg
-- 6 维动作顺序（与 UAVFlow 日志/训练一致）：[dx, dy, dz, droll, dyaw, dpitch]
+Goals:
+- Load the world model and the action head once at startup (kept resident in memory/GPU).
+- The client streams RGB frames per trajectory (`session_id`):
+  - First call: typically 1 warmup frame (and an optional instruction/prompt).
+  - Next calls: typically `step` frames per call (accumulated until `num_frames`).
+- The server runs the world model to produce summed_codes (latents), then predicts delta actions via the default
+  Stage-2 latent-to-action path (decoder features -> adapter tokens -> TimesFormer sliding windows).
+- Output delta actions are in cm/deg, ordered as: [dx, dy, dz, droll, dyaw, dpitch].
 
-运行示例：
+Example:
   export INFINITY_CKPT=./checkpoints/infinity/global_step_xxx.pth
   uvicorn server:app --host 0.0.0.0 --port 8002
 
-自测示例（需要真实 ckpt 与 route_dir）：
+Self-test (requires real checkpoints and a route_dir):
   python3 server.py --self_test \
     --infinity_ckpt "$INFINITY_CKPT" \
     --route_dir /path/to/route_dir

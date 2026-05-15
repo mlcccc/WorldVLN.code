@@ -8,7 +8,7 @@ The script starts finetuning from the original sharded base weights and uses rep
 
 ## Open-source Readiness
 
-`scripts/train_from_base.sh` no longer contains machine-specific hard-coded paths such as `/home/...`, `/manifold-obs/...`, or old workspace locations.
+`scripts/train_from_base.sh` no longer contains machine-specific hard-coded paths (for example, user home folders, cluster mount points, or prior workspace locations).
 
 Default paths are resolved relative to the repository root:
 

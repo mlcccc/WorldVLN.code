@@ -2,14 +2,14 @@
 # SPDX-License-Identifier: MIT
 
 """
-Streaming/session wrapper for InfinityStar KV-cache workflow.
+Streaming/session wrapper for the InfinityStar KV-cache workflow.
 
-目标：对齐 lingbot-va 的 `Compute KV -> Infer chunk -> Correction` 语义。
+Goal: match the lingbot-va semantics of `Compute KV -> Infer chunk -> Correction`.
 
-核心约定：
-- 文本前缀缓存 key 使用 't0'，并以 GT 方式写入（is_pred=False），避免 clear_pred_cache 时被误删。
-- 观测帧编码缓存 key 使用 'gt_obs'，并以 GT 方式写入（is_pred=False）。
-- 推理阶段写入的 KV cache 视为 Pred（is_pred=True），Correction 时一键清除。
+Key conventions:
+- Use 't0' as the text-prefix cache key and write it as GT (is_pred=False) so it won't be removed by clear_pred_cache().
+- Use 'gt_obs' as the observation-frame cache key and write it as GT (is_pred=False).
+- KV-cache entries written during inference are treated as Pred (is_pred=True) and are cleared in one shot during correction.
 """
 
 from __future__ import annotations
@@ -78,12 +78,12 @@ class InfinityStreamingSession:
         self.bs = 1  # batch size for caching (1 for no-CFG, 2 for CFG)
 
     def build_schedule_for_num_frames(self, num_frames: int) -> StreamingSchedule:
-        """构造当前 chunk 的 scale_schedule / context_info（与官方 infer 脚本对齐）。"""
+        """Build scale_schedule / context_info for the current chunk (aligned with the official inference script)."""
         args = self.args
         dynamic_resolution_h_w, h_div_w_templates = get_dynamic_resolution_meta(args.dynamic_scale_schedule, args.video_frames)
         h_div_w_template_ = h_div_w_templates[np.argmin(np.abs(h_div_w_templates - self.h_div_w_template))]
 
-        # 视频 token 的时间轴是压缩后的：pt = (num_frames-1)//temporal_compress_rate + 1
+        # Video token timeline is temporally compressed: pt = (num_frames-1)//temporal_compress_rate + 1
         pt = (num_frames - 1) // args.temporal_compress_rate + 1
         scale_schedule = dynamic_resolution_h_w[h_div_w_template_][args.pn]["pt2scale_schedule"][pt]
 
@@ -104,7 +104,7 @@ class InfinityStreamingSession:
 
     @torch.no_grad()
     def reset(self, prompt: str, negative_prompt: str = "", cfg_scale: float = 1.0):
-        """清空所有 KV cache，并写入文本前缀 cache('t0') 为 GT。"""
+        """Clear all KV caches, then write the text-prefix cache ('t0') as GT."""
         args = self.args
         model_dtype = next(iter(self.infinity.parameters())).dtype
         self.bs = 2 if float(cfg_scale) != 1.0 else 1
@@ -113,7 +113,7 @@ class InfinityStreamingSession:
         for blk in self.infinity.unregistered_blocks:
             blk.attn.kv_caching(True, reset=True)
 
-        # 2) encode prompt (cond/uncond 若需要 CFG)
+        # 2) encode prompt (cond/uncond if CFG is used)
         text_cond_tuple = encode_prompt(args.text_encoder_ckpt, self.text_tokenizer, self.text_encoder, prompt, enable_positive_prompt=False, low_vram_mode=False)
         if negative_prompt:
             neg_tuple = encode_prompt(args.text_encoder_ckpt, self.text_tokenizer, self.text_encoder, negative_prompt, enable_positive_prompt=False, low_vram_mode=False)
@@ -168,7 +168,8 @@ class InfinityStreamingSession:
     @torch.no_grad()
     def compute_kv_cache_gt(self, obs_video_bcthw: torch.Tensor):
         """
-        Step 1 / Step 4：把观测到的帧编码成 latent tokens，并写入 cache(key=gt_obs_cache_key, is_pred=False)。
+        Step 1 / Step 4: encode observed frames into latent tokens and write them to the cache
+        (key=gt_obs_cache_key, is_pred=False).
         """
         assert obs_video_bcthw.ndim == 5 and obs_video_bcthw.shape[1] == 3, "expect [B,3,T,H,W]"
         device = next(iter(self.infinity.parameters())).device
@@ -235,12 +236,13 @@ class InfinityStreamingSession:
         gt_ls_Bl=None,
     ):
         """
-        Step 2：基于当前 cache 推理未来 chunk，并把推理过程中写入的 cache 标记为 Pred（is_pred=True）。
+        Step 2: infer a future chunk based on the current cache, and mark any cache entries written during inference
+        as Pred (is_pred=True).
 
-        注意：这里使用官方 `autoregressive_infer`，但：
-        - kv_cache_reset=False：保留历史 cache（含 GT 't0' / 'gt_obs'）
-        - skip_text_forward=True：避免重复写 text cache
-        - extra_ref_text_scale_inds=['gt_obs']：让所有视觉 scale 可以 attend 到观测 cache
+        Note: this uses the official `autoregressive_infer`, with:
+        - kv_cache_reset=False: keep historical caches (including GT 't0' / 'gt_obs')
+        - skip_text_forward=True: avoid re-writing text cache
+        - extra_ref_text_scale_inds=['gt_obs']: allow all visual scales to attend to the observation cache
         """
         assert self._text_cond_tuple is not None, "call reset() first"
         text_cond_tuple, neg_tuple = self._text_cond_tuple
@@ -296,7 +298,7 @@ class InfinityStreamingSession:
             )
 
     def correction_clear_pred(self):
-        """Step 4：一键清除 Pred KV cache（GT 保留）。"""
+        """Step 4: clear Pred KV cache in one shot (GT caches are kept)."""
         self.infinity.clear_pred_cache()
 
     def cache_stats(self) -> Tuple[int, int, int]:

@@ -3,17 +3,17 @@
 # SPDX-License-Identifier: MIT
 
 """
-InfinityStar 流式推理辅助脚本。
+Helper script for InfinityStar closed-loop / streaming inference.
 
-当前在开源整理后的项目里，这个文件主要承担两类用途：
+In the open-source layout, this file is mainly used for:
 
-- 作为 `infer/server.py` 与 `action_aware_grpo/grpo_server.py` 复用的参数构造入口。
-- 在需要离线排查时，对一段真实帧序列执行一次完整的流式回放。
+- A shared argument builder reused by `infer/server.py` and `action_aware_grpo/grpo_server.py`.
+- Offline debugging: replay a sequence of real frames through the streaming pipeline.
 
-你只需要准备一个按时间顺序命名的真实帧目录和对应的 prompt 信息，
-脚本会自动排序读取并输出推理结果。
+Prepare a directory of real frames (named in chronological order) and the corresponding prompt.
+The script will sort frames automatically and print inference results.
 
-示例：
+Example:
   python3 tools/closed_loop_streaming_infer_480p_81f.py \
     --ckpt ./checkpoints/model.pth \
     --route_dir ./data/reference_route \
@@ -92,12 +92,12 @@ def _read_prompt(prompt: Optional[str], prompt_json: Optional[str], prompt_key: 
     if prompt and prompt.strip():
         return prompt.strip()
     if not prompt_json:
-        raise ValueError("需要提供 --prompt 或 --prompt_json")
+        raise ValueError("Must provide --prompt or --prompt_json")
     with open(prompt_json, "r", encoding="utf-8") as f:
         pj = json.load(f)
     p = pj.get(prompt_key) or pj.get("instruction_unified") or pj.get("instruction") or pj.get("prompt")
     if not isinstance(p, str) or not p.strip():
-        raise ValueError(f"在 {prompt_json} 中找不到 prompt（key={prompt_key}）")
+        raise ValueError(f"Prompt not found in {prompt_json} (key={prompt_key})")
     return p.strip()
 
 
@@ -206,7 +206,7 @@ def _take_with_pad(paths: List[str], n: int, pad_short_real: bool) -> List[str]:
     if not paths:
         raise ValueError("no real frames found")
     if not pad_short_real:
-        raise ValueError(f"真实帧不足：need={n} but only={len(paths)} (use --pad_short_real to pad)")
+        raise ValueError(f"Not enough real frames: need={n} but only={len(paths)} (use --pad_short_real to pad)")
     # Repeat last frame path to reach n.
     return paths + [paths[-1]] * (n - len(paths))
 
@@ -230,9 +230,9 @@ def _obs_points(total_gt_frames: int, pred_num_frames: int, step: int) -> List[i
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ckpt", type=str, required=True, help="global_step_*.pth（checkpoint_type=torch）")
-    ap.add_argument("--route_dir", type=str, default="", help="路线目录（默认读取 route_dir/images 与 route_dir/meta.json）")
-    ap.add_argument("--frames_dir", type=str, default="", help="真实观测帧目录（按文件名排序）。若提供 route_dir 可省略")
+    ap.add_argument("--ckpt", type=str, required=True, help="global_step_*.pth (checkpoint_type=torch)")
+    ap.add_argument("--route_dir", type=str, default="", help="Route directory (reads route_dir/images and route_dir/meta.json by default)")
+    ap.add_argument("--frames_dir", type=str, default="", help="Directory of real observation frames (sorted by filename). Can be omitted if --route_dir is set.")
     ap.add_argument("--prompt", type=str, default="")
     ap.add_argument("--prompt_json", type=str, default="")
     ap.add_argument("--prompt_key", type=str, default="instruction_unified")
@@ -241,11 +241,11 @@ def main() -> None:
 
     ap.add_argument("--num_frames", type=int, default=81)
     ap.add_argument("--step", type=int, default=16)
-    ap.add_argument("--save_full_pred", action="store_true", help="额外保存每次推理得到的完整 N 帧预测视频")
-    ap.add_argument("--pad_short_real", action="store_true", default=True, help="当真实帧少于 num_frames 时，用最后一帧重复补齐（默认开启）")
-    ap.add_argument("--no_pad_short_real", action="store_false", dest="pad_short_real", help="关闭补齐；真实帧不足则报错/提前结束")
-    ap.add_argument("--watch", action="store_true", help="实时模式：等待 frames_dir 不断新增帧，凑够每个 obs_len 后再推理")
-    ap.add_argument("--poll_interval", type=float, default=0.5, help="watch 模式轮询间隔（秒）")
+    ap.add_argument("--save_full_pred", action="store_true", help="Also save the full N-frame predicted video for each inference call")
+    ap.add_argument("--pad_short_real", action="store_true", default=True, help="If real frames are fewer than num_frames, pad by repeating the last frame (enabled by default)")
+    ap.add_argument("--no_pad_short_real", action="store_false", dest="pad_short_real", help="Disable padding; fail/stop early when real frames are insufficient")
+    ap.add_argument("--watch", action="store_true", help="Watch mode: wait for new frames under frames_dir and run inference once enough frames are available")
+    ap.add_argument("--poll_interval", type=float, default=0.5, help="Polling interval (seconds) for watch mode")
     ap.add_argument("--fps", type=int, default=16)
     ap.add_argument("--pn", type=str, default="0.40M")
     ap.add_argument("--h_div_w_template", type=float, default=0.562)
@@ -282,13 +282,16 @@ def main() -> None:
     negative_prompt = (args_cli.negative_prompt or "").strip()
 
     if not frames_dir:
-        raise ValueError("需要提供 --frames_dir 或 --route_dir")
+        raise ValueError("Must provide --frames_dir or --route_dir")
 
     frame_paths = _sorted_images(frames_dir)
     if not frame_paths:
-        raise FileNotFoundError(f"在 {frames_dir} 下找不到图片帧（请先写入至少 1 帧）")
+        raise FileNotFoundError(f"No image frames found under {frames_dir} (write at least 1 frame first)")
     if (not args_cli.watch) and (len(frame_paths) < int(args_cli.num_frames)) and bool(args_cli.pad_short_real):
-        print(f"[warn] real_frames={len(frame_paths)} < num_frames={args_cli.num_frames}，将用最后一帧重复补齐到 {args_cli.num_frames} 帧用于写入 GT cache")
+        print(
+            f"[warn] real_frames={len(frame_paths)} < num_frames={args_cli.num_frames}; "
+            f"padding by repeating the last frame to {args_cli.num_frames} for writing GT cache"
+        )
 
     # Build args + load models
     a = _make_args(
@@ -330,7 +333,7 @@ def main() -> None:
     # Init session (text cache as GT). IMPORTANT: cfg != 1 -> bs=2, so GT caches will be written with bs=2.
     session.reset(prompt_infer, negative_prompt=negative_prompt, cfg_scale=float(a.cfg))
 
-    # Loop points (离线模式): 1, 17, 33, ... , min(81, len(frames))
+    # Loop points (offline): 1, 17, 33, ... , min(81, len(frames))
     total_for_points = int(args_cli.num_frames) if (not args_cli.watch and bool(args_cli.pad_short_real)) else len(frame_paths)
     points = _obs_points(total_gt_frames=total_for_points, pred_num_frames=int(args_cli.num_frames), step=int(args_cli.step))
     if not args_cli.watch:
@@ -422,7 +425,7 @@ def main() -> None:
     if not args_cli.watch:
         # Offline: iterate intervals [1->17], [17->33], ... and save each predicted segment BEFORE writing next GT.
         if len(points) < 2:
-            raise ValueError(f"points={points} 太短，无法做分段保存（需要至少 2 个点）")
+            raise ValueError(f"points={points} too short to do segmented saving (need at least 2 points)")
         for i in range(len(points) - 1):
             obs_len = int(points[i])
             next_obs_len = int(points[i + 1])
@@ -436,7 +439,7 @@ def main() -> None:
             _write_gt_obs(frame_paths, obs_len=next_obs_len)
         return
 
-    # watch 模式：按 1 -> 1+step -> ... -> num_frames 逐次等待目录新增帧
+    # watch mode: wait for new frames as 1 -> 1+step -> ... -> num_frames
     points_watch = _obs_points(total_gt_frames=10**9, pred_num_frames=int(args_cli.num_frames), step=int(args_cli.step))
     # Ensure at least the first frame exists, then write GT obs_len=1 already done above.
     for i in range(len(points_watch) - 1):

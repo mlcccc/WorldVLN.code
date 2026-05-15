@@ -557,7 +557,7 @@ def main():
     ap.add_argument("--angles_in_degrees", action="store_true", default=True)
     ap.add_argument("--amp", action="store_true", default=True)
     ap.add_argument("--compute_metrics", action="store_true", default=True)
-    ap.add_argument("--first_n", type=int, default=0, help="只推理前 N 条（0 表示全部）")
+    ap.add_argument("--first_n", type=int, default=0, help="Only run inference on the first N items (0 = all)")
     ap.add_argument(
         "--routes",
         type=str,
@@ -568,7 +568,7 @@ def main():
     ap.add_argument("--infinitystar_vae_path", type=str, default="", help="Optional override; otherwise read from Stage-2 checkpoint metadata.")
     ap.add_argument("--infinitystar_vae_type", type=int, default=0, help="Optional override; 0 means read from checkpoint metadata or use 64.")
     ap.add_argument("--infinitystar_root", type=str, default="")
-    ap.add_argument("--tqdm", action="store_true", default=True, help="显示 tqdm 进度条（若环境可用）")
+    ap.add_argument("--tqdm", action="store_true", default=True, help="Show tqdm progress bar (if available)")
     args = ap.parse_args()
 
     ckpt_path = str(args.ckpt).strip() or _find_latest_stage2_checkpoint(str(args.stage2_root))

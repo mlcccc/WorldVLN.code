@@ -2,27 +2,27 @@
 # -*- coding: utf-8 -*-
 
 """
-Infinity+TSformer 客户端（测试阶段：按 num_frames/step 分段发送观测，落盘服务端返回的动作）
+Client script for the WorldVLN online inference server.
 
-约定：
-- 每条轨迹一个 session_id（建议=轨迹目录名）
-- 发送：先 1 帧 warmup，然后每次发送 step 帧，直到累计达到 num_frames
+Protocol:
+- One trajectory corresponds to one `session_id` (typically the route folder name).
+- Upload frames incrementally: first 1 warmup frame, then `step` frames per call until `num_frames` is reached.
 
-服务端输出：
-- 动作增量单位 cm/deg，顺序为 [dx, dy, dz, droll, dyaw, dpitch]
-- action_head_mode=tsformer_latent：每段返回 4 个动作（宏动作）
-- action_head_mode=actionhead_ref_vit：每段返回 step 个动作（逐帧动作；step=16 时即 16 个动作）
+Server output:
+- Delta actions are in cm/deg, ordered as [dx, dy, dz, droll, dyaw, dpitch].
+- action_head_mode=tsformer_latent: emits 4 macro actions per segment.
+- action_head_mode=actionhead_ref_vit: emits `step` per-frame actions per segment (step=16 -> 16 actions).
 
-客户端落盘（每段两份 JSON；文件名包含 session_id，便于检查）：
-1) actions json：
-   - actions_server_order: Nx6 (dx,dy,dz,droll,dyaw,dpitch) 原样保存（N 取决于 action_head_mode）
-   - actions_client_order: Nx6 (dx,dy,dz,droll,dpitch,dyaw) 供你检查/对齐其它代码
-   - action_frames: 逐动作对应的图片（dataset: 记录路径；unrealcv: 记录落盘文件名）
-   - cumsum_*: 在“本文件内”对 actions 做累计和（Nx6）
-2) poses json（绝对坐标系）：
-   - 第 0 段：points 里包含起点 + N 个终点，共 1+N 点
-   - 后续段：points 仅包含 N 个终点（N 点）
-   - 位姿顺序固定为 [x, y, z, roll, yaw, pitch]（单位 cm/deg）
+Client outputs (two JSON files per segment, filename includes session_id):
+1) actions json:
+   - actions_server_order: Nx6 in server order (N depends on action_head_mode)
+   - actions_client_order: Nx6 in an alternate order used by some downstream tooling
+   - action_frames: per-action frame identifiers (dataset: path; unrealcv: saved filename)
+   - cumsum_*: cumulative sums of actions (within the file)
+2) poses json (absolute coordinates):
+   - segment 0: points include start + N endpoints (1+N points)
+   - later segments: points include N endpoints only
+   - pose order is [x, y, z, roll, yaw, pitch] in cm/deg
 """
 
 from __future__ import annotations
@@ -108,8 +108,8 @@ def _save_pil_jpeg(img: Image.Image, path: str, *, quality: int = 95) -> None:
 
 def _safe_np_image_to_pil_rgb(img_any: Any) -> Image.Image:
     """
-    UnrealCV 的 get_image(...) 通常返回 np.ndarray(H,W,3)（很多实现为 BGR）。
-    这里做一个尽量稳妥的转换，确保返回 PIL RGB。
+    UnrealCV get_image(...) often returns np.ndarray(H,W,3) (many implementations use BGR).
+    Convert to a PIL RGB image as robustly as possible.
     """
     if isinstance(img_any, Image.Image):
         return img_any.convert("RGB")
@@ -178,10 +178,11 @@ def _apply_action_to_pose_with_frame(
     pose: [x,y,z,roll,yaw,pitch] in cm/deg
     action: [dx,dy,dz,droll,dyaw,dpitch] in cm/deg
 
-    - action_frame="world": 直接相加（世界系增量）
-    - action_frame="body": 将 (dx,dy) 视为机体系（前/右），根据 body_apply_order 选择“先转向再平移”或“先平移再转向”
+    - action_frame="world": direct add (world-frame deltas)
+    - action_frame="body": treat (dx,dy) as body-frame (forward/right) and rotate by yaw; body_apply_order selects
+      whether to turn first then translate, translate first then turn, or use midpoint integration.
 
-    备注：dz 按 Z(up) 方向直接相加；当忽略 pitch/roll 时，该假设通常成立。
+    Note: dz is added along Z(up) directly; this is typically acceptable when pitch/roll are small or ignored.
     """
     if len(pose_xyz_rpy) != 6 or len(action_dxdy_dz_droll_dyaw_dpitch) != 6:
         raise ValueError("pose/action must be 6D")
@@ -302,9 +303,9 @@ def _load_num_frames_step_from_config(config_json: str) -> Tuple[int, int]:
 
 def _load_instruction_and_initial_pose_from_task_json(task_json_path: str) -> Tuple[str, List[float]]:
     """
-    读取 UAV-Flow-Eval 任务 json（如 test_jsons/*.json），抽取：
-    - instruction（或 instruction_unified）
-    - initial_pos: [x,y,z,roll,yaw,pitch]（单位 cm/deg）
+    Read a UAV-Flow-Eval task json (e.g. test_jsons/*.json) and extract:
+    - instruction (or instruction_unified)
+    - initial_pos: [x,y,z,roll,yaw,pitch] in cm/deg
     """
     d = _read_json(task_json_path)
     if not isinstance(d, dict):
@@ -321,10 +322,10 @@ def _load_instruction_and_initial_pose_from_task_json(task_json_path: str) -> Tu
 
 def _build_obj_info_from_task_json(task_json_path: str) -> Optional[Dict[str, Any]]:
     """
-    对齐 batch_run_act_all.py:
-    - 只有同时存在 obj_id 和 use_obj 才尝试放置对象
-    - 优先使用 target_pos[:3]/target_pos[3:] 作为 obj_pos/obj_rot
-    - 否则退回 obj_pos/obj_rot
+    Align with batch_run_act_all.py:
+    - only place an object when both obj_id and use_obj exist
+    - prefer target_pos[:3]/target_pos[3:] as obj_pos/obj_rot when available
+    - otherwise fall back to obj_pos/obj_rot
     """
     d = _read_json(task_json_path)
     if not isinstance(d, dict):
@@ -351,7 +352,7 @@ def _build_obj_info_from_task_json(task_json_path: str) -> Optional[Dict[str, An
 
 def _init_marker_objects_if_needed(env: Any) -> None:
     """
-    在场景里创建/初始化标识物对象（只做一次），对齐 batch_run_act_all.py 的初始化行为。
+    Create/initialize marker objects in the scene (once), aligned with batch_run_act_all.py init behavior.
     """
     # Avoid repeated init across tasks in same process.
     if bool(getattr(env.unwrapped, "_xjc_marker_inited", False)):
@@ -369,13 +370,13 @@ def _init_marker_objects_if_needed(env: Any) -> None:
         time.sleep(1.0)
         env.unwrapped._xjc_marker_inited = True
     except Exception:
-        # 场景中对象可能已存在或类名不支持，不阻断主流程。
+        # Objects may already exist or class names may differ; do not block the main control flow.
         env.unwrapped._xjc_marker_inited = True
 
 
 def _create_obj_if_needed_unrealcv(env: Any, obj_info: Optional[Dict[str, Any]]) -> None:
     """
-    放置任务对象，逻辑对齐 batch_run_act_all.py 的 create_obj_if_needed。
+    Place the task object; logic aligned with batch_run_act_all.py create_obj_if_needed.
     """
     if obj_info is None:
         return
@@ -402,19 +403,19 @@ def _create_obj_if_needed_unrealcv(env: Any, obj_info: Optional[Dict[str, Any]])
         if int(use_obj) in (1, 2):
             time.sleep(1.0)
     except Exception:
-        # 不中断主控制流程，避免因为场景资产差异导致整体失败。
+        # Do not interrupt the main control flow; avoid failing due to scene-asset differences.
         pass
 
 
 def _setup_unrealcv_camera_follow(env: Any, *, cam_id: int = 0) -> None:
     """
-    将相机绑定到无人机当前位置，模拟第一人称视角。
-    参考 batch_run_act_all.py 的 set_cam 逻辑。
+    Bind the camera to the UAV position to approximate a first-person view.
+    Mirrors batch_run_act_all.py set_cam logic.
     """
     x, y, z = env.unwrapped.unrealcv.get_obj_location(env.unwrapped.player_list[0])
     roll, yaw, pitch = env.unwrapped.unrealcv.get_obj_rotation(env.unwrapped.player_list[0])  # [roll, yaw, pitch]
     cam_loc = [x, y, z]
-    cam_rot = [roll, pitch, yaw]  # 注意 UnrealCV 的 set_cam rot 顺序
+    cam_rot = [roll, pitch, yaw]  # UnrealCV set_cam rotation order
     env.unwrapped.unrealcv.set_cam(int(cam_id), cam_loc, cam_rot)
 
 
@@ -425,8 +426,8 @@ def _apply_pose_unrealcv(
     yaw_offset_deg: float = -180.0,
 ) -> None:
     """
-    将 [x,y,z,roll,yaw,pitch] 应用到仿真里（单位 cm/deg）。
-    对 drone 来说，gym_unrealcv 的 set_obj_rotation 往往不生效，因此使用 set_rotation(yaw)。
+    Apply [x,y,z,roll,yaw,pitch] to the simulator (cm/deg).
+    For the drone, gym_unrealcv set_obj_rotation may not take effect reliably, so we use set_rotation(yaw).
     """
     if len(pose_xyz_rpy) < 6:
         raise ValueError(f"pose must be 6D, got {len(pose_xyz_rpy)}")
@@ -457,7 +458,7 @@ def _wait_pose_settle(
     pos_tol_cm: float = 1.0,
     yaw_tol_deg: float = 1.0,
 ) -> None:
-    """等待 set_obj_location/set_rotation 在仿真里真正生效，减少首帧取到旧位姿的概率。"""
+    """Wait for set_obj_location/set_rotation to take effect, reducing the chance of capturing a stale first frame."""
     tx, ty, tz = [float(v) for v in target_pose_xyz_rpy[:3]]
     tyaw_set = float(target_pose_xyz_rpy[4]) + float(yaw_offset_deg)
     for _ in range(int(max_tries)):
@@ -508,14 +509,16 @@ def run_one_task_unrealcv(
     save_images: bool = True,
 ) -> None:
     """
-    在线模式（gym_unrealcv）：
-    - 从 task_json 读 instruction + initial_pos
-    - 采集 256x256 的 lit RGB（由 ConfigUEWrapper 设置分辨率）
-    - 增量发送图片：1, step, step, ...（prefix_mode=false；历史由服务端按 session_id 存储）
-    - tsformer_latent：收到 4 个宏动作后，每个动作均匀拆成 4 小动作，总共 step(=16) 次执行；每次执行后采一张图并落盘
-    - actionhead_ref_vit：直接收到 step(=16) 个逐帧动作，逐个执行；每次执行后采一张图并落盘
+    Online mode (gym_unrealcv):
+    - Read instruction + initial_pos from task_json
+    - Capture 256x256 lit RGB (resolution set by ConfigUEWrapper)
+    - Upload frames incrementally: 1, step, step, ... (prefix_mode=false; history is stored server-side by session_id)
+    - tsformer_latent: after receiving 4 macro actions, split each into 4 sub-actions to execute step(=16) steps;
+      capture and save one frame after each executed step
+    - actionhead_ref_vit: directly receive step(=16) per-frame actions; execute one-by-one and save frames
 
-    注意：server.py 在 n==1 仅 warmup，不会返回动作。这里会先“原地采 step 帧”把服务端推进到可吐 seg0 的状态。
+    Note: on n==1 the server may only warm up and emit no actions. This client advances the server timeline by
+    capturing/uploading `step` frames in place to make seg0 available.
     """
     instruction, init_pose = _load_instruction_and_initial_pose_from_task_json(task_json_path)
     obj_info = _build_obj_info_from_task_json(task_json_path)
@@ -542,7 +545,7 @@ def run_one_task_unrealcv(
     _create_obj_if_needed_unrealcv(env, obj_info)
     _apply_pose_unrealcv(env, pose_xyz_rpy=init_pose, yaw_offset_deg=float(yaw_offset_deg))
     _wait_pose_settle(env, target_pose_xyz_rpy=init_pose, yaw_offset_deg=float(yaw_offset_deg))
-    # 给相机更多刷新时间，减少首帧取到旧视角的概率。
+    # Give the camera extra time to refresh to reduce stale-view risk for the first frame.
     time.sleep(1.0)
 
     summary = {
@@ -785,7 +788,8 @@ def run_one_task_unrealcv(
                         break
                     if max_actions_i <= 0 and frame_idx >= int(num_frames):
                         break
-            # If produced不足：仅在 num_frames 模式下用原地采样补齐；在 max_actions 模式下不补帧（严格每动作一帧）。
+            # If produced is insufficient: only pad by in-place sampling in num_frames mode; do not pad in max_actions mode
+            # (strictly one frame per executed action).
             if max_actions_i <= 0:
                 while produced < total_needed and frame_idx < int(num_frames):
                     im = _capture_unrealcv_lit_pil(env, cam_id=0)
