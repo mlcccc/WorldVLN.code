@@ -630,6 +630,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--manifest_json", type=str, required=True)
     ap.add_argument("--items_key", type=str, default="ALL", help="Manifest key(s) to use; comma-separated, or ALL for every items_* list.")
+    ap.add_argument(
+        "--workspace_root",
+        type=str,
+        default="",
+        help=(
+            "Base directory for resolving relative paths inside manifest_json. "
+            "If empty, defaults to the open-source package root (the folder containing Worldmodel/ and train/). "
+            "Set this when your manifest paths are relative to a different root (e.g. the repo root above opensource/)."
+        ),
+    )
     ap.add_argument("--max_items", type=int, default=0)
     # Match legacy stage2 launcher defaults: do not enforce fixed T.
     ap.add_argument("--require_T", type=int, default=0)
@@ -936,11 +946,12 @@ def main():
 
     # Repository root (the folder containing Worldmodel/, infer/, train/, etc.)
     vln_uav_root = os.path.abspath(os.path.join(_PROJ_ROOT, "..", "..", ".."))
+    ws_root = str(args.workspace_root).strip() or vln_uav_root
     max_items = int(args.max_items) if int(args.max_items) > 0 else None
     ds = LatentTrajManifestDataset(
         manifest_json=str(args.manifest_json),
         items_key=str(args.items_key),
-        workspace_root=vln_uav_root,
+        workspace_root=ws_root,
         transform=None,
         load_frames=False,
         max_items=max_items,

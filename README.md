@@ -34,7 +34,7 @@ pip install -r requirements.txt
 
 Official WorldVLN weights are available on Hugging Face:
 
-- [WorldVLN weights](https://huggingface.co/anonymous-WorldVLN/WorldVLN/tree/main/WorldVLN_backbone)
+- [WorldVLN weights](https://huggingface.co/EmbodiedCity/WorldVLN)
 
 Download the weights to your preferred checkpoint directory and configure the relevant training or inference scripts to point to them.
 
@@ -103,6 +103,10 @@ This repository is organized into two stages:
 - **Stage 2 (action-aware GRPO)**: rollout collection + GRPO training.
 
 ![WorldVLN framework](./assets/framework.png)
+
+IndoorUAV simulation environment download guide: [Indoor_UAV](https://modelscope.cn/datasets/valyentine/Indoor_UAV).
+
+UAV-Flow benchmark and evaluation environment: [buaa-colalab/UAV-Flow](https://github.com/buaa-colalab/UAV-Flow).
 
 ### Stage 1: Supervised Training
 
@@ -248,6 +252,14 @@ At a high level:
 - Train consumes replay metadata and runs optimization to produce updated checkpoints and logs.
 
 For simulator-backed rollout details, see [action_aware_grpo/docs/remote_sim.md](./action_aware_grpo/docs/remote_sim.md).
+
+## Acknowledgement
+
+We sincerely thank the following work for their exceptional effort: InfinityStar, TSformer-vo.
+
+## Citation
+
+If you find this work useful, please cite the WorldVLN paper.
 
 ## License
 
