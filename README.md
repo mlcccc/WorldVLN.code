@@ -38,6 +38,11 @@ Official WorldVLN weights are available on Hugging Face:
 
 Download the weights to your preferred checkpoint directory and configure the relevant training or inference scripts to point to them.
 
+Simulation / benchmark resources:
+
+- IndoorUAV simulation environment download guide: [Indoor_UAV](https://modelscope.cn/datasets/valyentine/Indoor_UAV)
+- UAV-Flow benchmark and evaluation environment: [buaa-colalab/UAV-Flow](https://github.com/buaa-colalab/UAV-Flow)
+
 ## Inference
 
 The repository currently provides two main inference entry points.
@@ -103,10 +108,6 @@ This repository is organized into two stages:
 - **Stage 2 (action-aware GRPO)**: rollout collection + GRPO training.
 
 ![WorldVLN framework](./assets/framework.png)
-
-IndoorUAV simulation environment download guide: [Indoor_UAV](https://modelscope.cn/datasets/valyentine/Indoor_UAV).
-
-UAV-Flow benchmark and evaluation environment: [buaa-colalab/UAV-Flow](https://github.com/buaa-colalab/UAV-Flow).
 
 ### Stage 1: Supervised Training
 
