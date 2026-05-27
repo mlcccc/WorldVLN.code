@@ -94,18 +94,25 @@ def process_parquet_file(parquet_path, output_dir, fps=16, max_trajectories=None
                 continue
 
         # Build JSONL entry
-        # The training script expects:
-        # - video_path, begin_frame_id, end_frame_id, fps
-        # - tarsier2_caption (used as caption)
-        # - frame_idxs (optional, explicit frame indices)
+        # Cap frames to max_frames (49 by default, matching video_frames in training)
+        max_frames = 49
+        if num_frames > max_frames:
+            # Uniformly subsample max_frames from the trajectory
+            indices = [int(i * (num_frames - 1) / (max_frames - 1)) for i in range(max_frames)]
+            frame_idxs = indices
+            capped_frames = max_frames
+        else:
+            frame_idxs = list(range(num_frames))
+            capped_frames = num_frames
+
         entry = {
             "video_path": os.path.abspath(video_path),
             "begin_frame_id": 0,
             "end_frame_id": num_frames - 1,
             "fps": float(fps),
             "tarsier2_caption": instruction,
-            "frame_idxs": list(range(num_frames)),
-            "sample_frames": num_frames,
+            "frame_idxs": frame_idxs,
+            "sample_frames": capped_frames,
         }
         jsonl_entries.append(entry)
 
