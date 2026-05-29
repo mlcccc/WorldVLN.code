@@ -1,0 +1,367 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "当前文件",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "推理服务器 (server.py)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/infer/server.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--infinity_ckpt", "${env:INFINITY_CKPT}",
+                "--stage2_ckpt", "${env:STAGE2_CKPT}",
+                "--port", "8001"
+            ]
+        },
+        {
+            "name": "推理客户端 - 数据集模式",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/infer/client.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode", "dataset",
+                "--dataset_root", "eval_samples_full",
+                "--server_url", "http://127.0.0.1:8001",
+                "--out_dir", "eval_results_full/client_run_test_run_002",
+                "--num_frames", "49",
+                "--step", "16",
+                "--prefix_mode", "1",
+                "--allow_future_last_seg", "1"
+            ]
+        },
+        {
+            "name": "推理客户端 - 单条轨迹",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/infer/client.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode", "single",
+                "--images_dir", "${input:imagesDir}",
+                "--server_url", "http://127.0.0.1:8001",
+                "--out_dir", "${input:outDir}",
+                "--num_frames", "49"
+            ]
+        },
+        {
+            "name": "提取轨迹 (extract_samples.py)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/extract_samples.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--parquet", "uav-flow/train-00000-of-00054.parquet",
+                "--out_dir", "eval_samples_full",
+                "--num_trajectories", "100",
+                "--min_frames", "40"
+            ]
+        },
+        {
+            "name": "格式转换 (convert_to_eval_format.py)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/convert_to_eval_format.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--results_root", "eval_results_full/client_run_test_run_002",
+                "--gt_root", "eval_samples_full",
+                "--out_root", "eval_results_full_converted"
+            ]
+        },
+        {
+            "name": "可视化 (visualize_results.py)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/visualize_results.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--samples_root", "eval_samples_sim",
+                "--results_root", "eval_results_sim_converted",
+                "--run_id", "",
+                "--out_dir", "eval_vis_sim"
+            ]
+        },
+        {
+            "name": "可视化 - 单条轨迹",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/visualize_results.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--sample_dir", "eval_samples_sim/2025-03-14_14-46-22",
+                "--results_root", "eval_results_sim_converted",
+                "--out_dir", "eval_vis_sim"
+            ]
+        },
+        {
+            "name": "官方评测 (eval_endpoints.py)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/train/action_decoder/tools/eval_endpoints.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--pred_root", "eval_results_full_converted",
+                "--gt_root", "eval_samples_full",
+                "--out_root", "eval_output_full",
+                "--gt_pose_file", "preprocessed_logs.json",
+                "--translation_divisor", "1.0",
+                "--angles_in_degrees",
+                "--dist_thr_m", "3.0",
+                "--ang_thr_deg", "10.0"
+            ]
+        },
+        {
+            "name": "一键完整评测 (run_full_eval.py)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/run_full_eval.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--parquet_dir", "uav-flow",
+                "--num_trajectories", "100",
+                "--server_url", "http://127.0.0.1:8001",
+                "--num_frames", "49",
+                "--step", "16",
+                "--vis_interval", "10"
+            ]
+        },
+        {
+            "name": "一键评测 - 跳过推理",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/run_full_eval.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--skip_inference"
+            ]
+        },
+        {
+            "name": "批量推理 RMSE (predict_pose.py)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/train/action_decoder/tools/predict_pose.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--dataset_root", "eval_samples_full",
+                "--server_url", "http://127.0.0.1:8001",
+                "--out_dir", "eval_results_full/predict_pose",
+                "--num_frames", "49"
+            ]
+        },
+        {
+            "name": "Sim评测 - 提取轨迹",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/extract_samples.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--parquet", "uav-flow-sim/train-00000-of-00021.parquet",
+                "--out_dir", "eval_samples_sim",
+                "--num_trajectories", "273",
+                "--min_frames", "5"
+            ]
+        },
+        {
+            "name": "Sim评测 - 推理",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/infer/client.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode", "dataset",
+                "--dataset_root", "eval_samples_sim",
+                "--server_url", "http://127.0.0.1:8001",
+                "--out_dir", "eval_results_sim/client_run_sim_test",
+                "--num_frames", "49",
+                "--step", "16",
+                "--prefix_mode", "1",
+                "--allow_future_last_seg", "1",
+                "--pad_short_real", "1"
+            ]
+        },
+        {
+            "name": "Sim评测 - 格式转换",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/convert_to_eval_format.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--results_root", "${input:resultsRunDir}",
+                "--gt_root", "eval_samples_sim",
+                "--out_root", "eval_results_sim_converted"
+            ]
+        },
+        {
+            "name": "Sim评测 - 计算SR",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/train/action_decoder/tools/eval_endpoints.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--pred_root", "eval_results_sim_converted",
+                "--gt_root", "eval_samples_sim",
+                "--out_root", "eval_output_sim",
+                "--gt_pose_file", "preprocessed_logs.json",
+                "--translation_divisor", "100.0",
+                "--angles_in_degrees",
+                "--dist_thr_m", "3.0",
+                "--ang_thr_deg", "10.0"
+            ]
+        },
+        {
+            "name": "Sim评测 - 可视化",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/visualize_results.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--samples_root", "eval_samples_sim",
+                "--results_root", "eval_results_sim_converted",
+                "--run_id", "",
+                "--out_dir", "eval_vis_sim"
+            ]
+        },
+        {
+            "name": "Sim评测 - 一键完整流程",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/run_sim_eval.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--parquet", "uav-flow-sim/train-00000-of-00021.parquet",
+                "--num_trajectories", "273",
+                "--min_frames", "5",
+                "--server_url", "http://127.0.0.1:8001",
+                "--num_frames", "49",
+                "--step", "16"
+            ]
+        },
+        {
+            "name": "Sim评测 - 跳过提取和推理",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/run_sim_eval.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--skip_extract",
+                "--skip_inference"
+            ]
+        },
+        {
+            "name": "UAV-Flow-Eval 在线仿真评测",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/UAV-Flow/UAV-Flow-Eval/batch_run_act_all.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--json_folder", "${workspaceFolder}/UAV-Flow/UAV-Flow-Eval/test_jsons",
+                "--server_port", "5007",
+                "--max_steps", "100",
+                "--instruction_type", "instruction_unified"
+            ]
+        },
+        {
+            "name": "UAV-Flow-Eval 计算nDTW",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/UAV-Flow/UAV-Flow-Eval/metric.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/UAV-Flow/UAV-Flow-Eval"
+        },
+        {
+            "name": "Sim评测 - 预测vs GT对比视频",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/visualize_pred_vs_gt.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--samples_root", "eval_samples_sim",
+                "--cache_dir", "infer/cache",
+                "--run_id", "2026-05-28_20-21-51",
+                "--out_dir", "eval_vis_sim_pred_stitched",
+                "--pred_source", "stitched_new4",
+                "--target_h", "360",
+                "--fps", "10"
+            ]
+        },
+        {
+            "name": "convert_to_eval_format (自定义路径)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/convert_to_eval_format.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--results_root", "${input:resultsRunDir}",
+                "--gt_root", "${input:gtRoot}",
+                "--out_root", "${input:outRoot}"
+            ]
+        },
+        {
+            "name": "eval_endpoints (自定义路径)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/train/action_decoder/tools/eval_endpoints.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--pred_root", "${input:predRoot}",
+                "--gt_root", "${input:gtRoot}",
+                "--out_root", "${input:outRoot}",
+                "--gt_pose_file", "preprocessed_logs.json",
+                "--translation_divisor", "1.0",
+                "--angles_in_degrees",
+                "--dist_thr_m", "3.0",
+                "--ang_thr_deg", "10.0"
+            ]
+        }
+    ],
+    "inputs": [
+        {
+            "id": "imagesDir",
+            "type": "promptString",
+            "description": "轨迹图像目录路径 (如 eval_samples_full/2025-04-03_14-55-09/images)"
+        },
+        {
+            "id": "outDir",
+            "type": "promptString",
+            "description": "输出目录路径",
+            "default": "eval_results_full/single_test"
+        },
+        {
+            "id": "sampleDir",
+            "type": "promptString",
+            "description": "轨迹样本目录路径 (如 eval_samples_full/2025-04-03_14-55-09)"
+        },
+        {
+            "id": "resultsRunDir",
+            "type": "promptString",
+            "description": "推理结果 run 目录 (如 eval_results_sim/client_run_sim_test/client_run_XXXXXXXX_XXXXXX)",
+            "default": "eval_results_sim/client_run_sim_test/client_run_2026-05-28_14-28-23"
+        },
+        {
+            "id": "gtRoot",
+            "type": "promptString",
+            "description": "GT 数据根目录",
+            "default": "eval_samples_sim"
+        },
+        {
+            "id": "outRoot",
+            "type": "promptString",
+            "description": "评测输出目录",
+            "default": "eval_output_sim"
+        },
+        {
+            "id": "predRoot",
+            "type": "promptString",
+            "description": "预测结果目录 (转换后的)",
+            "default": "eval_results_sim_converted"
+        }
+    ]
+}
