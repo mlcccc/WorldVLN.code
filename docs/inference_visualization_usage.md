@@ -420,7 +420,31 @@ python3 train/action_decoder/tools/eval_endpoints.py \
   - 判定条件：端点距离 ≤ 3.0m 且端点角度 ≤ 10.0°
 - **nDTW (normalized Dynamic Time Warping)**：论文的另一个指标，需要在线仿真环境计算
 
-### 8.5 在线仿真评测（官方方式）
+**单位注意：** sim 数据的 `preprocessed_logs.json` 中 xyz 是**厘米**（需 `--translation_divisor 100.0`），real-world 数据的 xyz 是**米**（需 `--translation_divisor 1.0`）。
+
+### 8.5 预测帧 vs GT 帧对比视频
+
+推理服务器会自动将预测的视觉帧保存到 `infer/cache/` 目录（`seg*_pred_full_*.mp4`）。可以用对比脚本生成左右并排视频：
+
+```bash
+# 生成对比视频
+python3 scripts/visualize_pred_vs_gt.py \
+    --samples_root eval_samples_sim \
+    --cache_dir infer/cache \
+    --run_id "" \
+    --out_dir eval_vis_sim_pred
+
+# 限制数量
+python3 scripts/visualize_pred_vs_gt.py --max_traj 10
+```
+
+输出格式：
+- 左侧：GT 帧（来自 parquet）
+- 右侧：WorldModel 预测帧（VAE 解码）
+- 顶部：标签 + 帧计数
+- 底部：指令文本
+
+### 8.6 在线仿真评测（官方方式）
 
 严格的 SR 和 nDTW 评测需要 UnrealZoo 模拟器环境：
 
@@ -439,6 +463,7 @@ python3 train/action_decoder/tools/eval_endpoints.py \
 | `scripts/extract_samples.py` | 从 UAV-Flow parquet 提取轨迹 |
 | `scripts/convert_to_eval_format.py` | 将客户端输出转换为官方评测格式 |
 | `scripts/visualize_results.py` | 生成轨迹可视化 |
+| `scripts/visualize_pred_vs_gt.py` | 预测帧 vs GT 帧对比视频 |
 | `scripts/run_full_eval.py` | 真实数据一键评测流程 |
 | `scripts/run_sim_eval.py` | UAV-Flow-Sim 离线评测流程 |
 | `train/action_decoder/tools/eval_endpoints.py` | 官方端点评测脚本 |

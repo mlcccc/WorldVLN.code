@@ -1,6 +1,6 @@
 {
   "infinity": {
-    "ckpt": "checkpoints/infinity/global_step_latest.pth",
+    "ckpt": "../worldvln/WorldVLN_backbone",
     "num_frames": 49,
     "step": 16,
     "fps": 16,

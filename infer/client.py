@@ -669,7 +669,7 @@ def run_one_task_unrealcv(
     # Determine expected action count for execution
     mode_l = str(action_head_mode).strip().lower()
     is_per_frame_mode = mode_l in ("actionhead_ref_vit", "actionhead_ref", "actionhead_vit", "ref_vit", "actionhead")
-    expected_actions = int(step) if bool(is_per_frame_mode) else 4
+    expected_actions = int(step)
 
     call_i = 0
     last_upload_n = 1  # first upload: 1 frame
@@ -751,43 +751,34 @@ def run_one_task_unrealcv(
                     action_image_names.append(name)
                     new_frames.append(im)
             else:
-                # Execute 4 macro actions, each split into 4 substeps => 16 frames
-                substeps_per_action = 4
+                # Execute per-frame actions directly (tsformer_latent returns step actions)
                 for a in pending_actions:
-                    for sub in _split_action_to_substeps(a, substeps=substeps_per_action):
-                        if produced >= total_needed:
-                            break
-                        if max_actions_i > 0 and int(actions_executed) >= int(max_actions_i):
-                            break
-                        if max_actions_i <= 0 and frame_idx >= int(num_frames):
-                            break
-                        next_pose = _apply_action_to_pose_with_frame(
-                            cur_pose,
-                            sub,
-                            action_frame=str(action_frame),
-                            body_apply_order=str(body_apply_order),
-                            integrate_roll_pitch=False,
-                        )
-                        cur_pose[0] = float(next_pose[0])
-                        cur_pose[1] = float(next_pose[1])
-                        cur_pose[2] = float(next_pose[2])
-                        cur_pose[4] = float(next_pose[4])
-                        _apply_pose_unrealcv(env, pose_xyz_rpy=cur_pose, yaw_offset_deg=float(yaw_offset_deg))
-                        im = _capture_unrealcv_lit_pil(env, cam_id=0)
-                        frame_idx += 1
-                        produced += 1
-                        actions_executed += 1
-                        name = f"frame_{frame_idx:04d}.jpg"
-                        if bool(save_images):
-                            _save_pil_jpeg(im, os.path.join(images_dir, name), quality=95)
-                        action_image_names.append(name)
-                        new_frames.append(im)
                     if produced >= total_needed:
                         break
                     if max_actions_i > 0 and int(actions_executed) >= int(max_actions_i):
                         break
                     if max_actions_i <= 0 and frame_idx >= int(num_frames):
                         break
+                    next_pose = _apply_action_to_pose_with_frame(
+                        cur_pose,
+                        a,
+                        action_frame=str(action_frame),
+                        body_apply_order=str(body_apply_order),
+                        integrate_roll_pitch=False,
+                    )
+                    cur_pose[0] = float(next_pose[0])
+                    cur_pose[1] = float(next_pose[1])
+                    cur_pose[2] = float(next_pose[2])
+                    cur_pose[4] = float(next_pose[4])
+                    im = _capture_unrealcv_lit_pil(env, cam_id=0)
+                    frame_idx += 1
+                    produced += 1
+                    actions_executed += 1
+                    name = f"frame_{frame_idx:04d}.jpg"
+                    if bool(save_images):
+                        _save_pil_jpeg(im, os.path.join(images_dir, name), quality=95)
+                    action_image_names.append(name)
+                    new_frames.append(im)
             # If produced is insufficient: only pad by in-place sampling in num_frames mode; do not pad in max_actions mode
             # (strictly one frame per executed action).
             if max_actions_i <= 0:
@@ -1009,7 +1000,7 @@ def run_one_route(
                 raise RuntimeError(f"bad segment_index from server: seg={seg} obs_points={obs_points}")
             expected_n = int(obs_points[seg + 1]) - int(obs_points[seg])  # usually == step
         else:
-            expected_n = 4
+            expected_n = int(step)
 
         if not isinstance(actions, list) or len(actions) != int(expected_n):
             raise RuntimeError(

@@ -669,8 +669,10 @@ def _build_stage2_infinity_vae_from_ckpt(ckpt: Dict[str, object]) -> torch.nn.Mo
     _ensure_infinity_repo_on_syspath()
 
     ckpt_args = ckpt.get("args") if isinstance(ckpt.get("args"), dict) else {}
+    env_vae_path = os.environ.get("INFINITYSTAR_VAE_PATH", "").strip()
     vae_path = (
-        str(ckpt.get("infinitystar_vae_path", "")).strip()
+        env_vae_path
+        or str(ckpt.get("infinitystar_vae_path", "")).strip()
         or str(ckpt_args.get("infinitystar_vae_path", "")).strip()
         or str((DEFAULT_INFINITY_REPO_ROOT / "checkpoint" / "infinitystar_videovae.pth").resolve())
     )

@@ -25,9 +25,22 @@ env/
 *.npy
 *.npz
 
-# Large data and model directories (managed separately)
-uav-flow/
-worldvln/
+# Symlinks to NAS / external storage
+train
+uav-flow
+uav-flow-sim
+worldvln
+
+# Eval outputs and artifacts
+eval_output_*/
+eval_results_*/
+eval_samples_*/
+eval_vis_*/
+eval_full_log.txt
+
+# Model checkpoints and build artifacts
+Worldmodel/runtime/checkpoint/
+*.whl
 
 # IDE / OS
 .vscode/
